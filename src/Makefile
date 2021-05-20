@@ -43,7 +43,7 @@ EXEC = cdfmoy cdfmoyt cdfstd  cdfmoy_weighted cdfmoy_freq cdfvT cdfuv\
        cdfisopsi cdf2matlab cdffixtime cdfgeostrophy cdfchgrid cdfcmp cdfmsk cdfocape cdf_compress \
        cdf_domain_modif  cdf_domain2bathy \
        cdf_remake_bathy \
-       cdf_dyndt cdf_dynvor cdf_dynadv_ubs cdf_dynhpg \
+       cdf_dyndt cdf_dynvor cdf_dynadv_ubs cdf_dynhpg cdf_dynspg_ts \
 
 .PHONY: all help clean cleanexe install man installman zclass_list.txt
 
@@ -75,6 +75,9 @@ cdf_dynvor:     cdfio.o       cdf_dynvor.f90
 
 cdf_dynhpg:     cdfio.o eos.o cdf_dynhpg.f90
 	$(F90) cdf_dynhpg.f90     -o $(BINDIR)/cdf_dynhpg           cdfio.o modcdfnames.o $(FFLAGS)
+
+cdf_dynspg_ts:     cdfio.o       cdf_dynspg_ts.f90
+	$(F90) cdf_dynspg_ts.f90     -o $(BINDIR)/cdf_dynspg_ts     cdfio.o modcdfnames.o $(FFLAGS)
 
 ## Statistical programs
 cdfmoy: cdfio.o   cdfmoy.f90
