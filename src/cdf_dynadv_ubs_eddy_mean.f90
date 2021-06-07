@@ -302,7 +302,7 @@ PROGRAM cdf_dynadv_ubs_eddy_mean
    !! fmask = 2 on lateral boundaries for no-slip bdy conditions on vorticity !!
    fmask(:,:) = getvar(cf_mask, 'fmask' , jk, jpiglo, jpjglo )
 
-   DO jt = 1,1
+   DO jt = 1,jpt
      sshn(:,:)     = getvar(cf_ssh  , cn_sossheig, 1, jpiglo, jpjglo, ktime=jt )
      e3t(:,:) = e3t_0(:,:) * (1 + sshn/ht_0)
      !- at u- and v- pts (domvvl.F90) -
@@ -900,9 +900,9 @@ CONTAINS
     ierr    = putheadervar(ncout_ke , cf_tt ,  jpiglo, jpjglo, jpk, nav_lon_t, nav_lat_t, deptht   )
 
     dtim = getvar1d(cf_uu , cn_vtimec,   jpt     )
-    ierr = putvar1d(ncout_u , dtim,        1, 'T')
-    ierr = putvar1d(ncout_v , dtim,        1, 'T')
-    ierr = putvar1d(ncout_ke, dtim,        1, 'T')
+    ierr = putvar1d(ncout_u , dtim,      jpt, 'T')
+    ierr = putvar1d(ncout_v , dtim,      jpt, 'T')
+    ierr = putvar1d(ncout_ke, dtim,      jpt, 'T')
 
 
   END SUBROUTINE CreateOutput
