@@ -1,12 +1,12 @@
-PROGRAM cdf_dynadv_ubs 
+PROGRAM cdf_dynadv_ubs_eddy_mean 
   !!======================================================================
-  !!                     ***  PROGRAM  cdf_dynadv_ubs  ***
+  !!                     ***  PROGRAM  cdf_dynadv_ubs_eddy_mean  ***
   !!=====================================================================
-  !!  ** Purpose : Compute the now momentum advection trend in flux form.
+  !!  ** Purpose : Compute momentum and KE advection trends following UBS advection scheme,
+  !!               as well as the eddy/mean contributions (optional).
   !!
   !!  ** Method  : Adapt NEMO dynadv_ubs.F90 to CDFTOOLS (cf below for further details)
   !!               following the parameter used in the configuration eNATL60.
-  !!
   !!
   !! History : 4.0  : 09/2019  : Q. Jamet & J.M. Molines : Original code
   !!                : 05/2021  : Q. Jamet & J.M. Molines : Turn the computation layer per layer
@@ -24,7 +24,8 @@ PROGRAM cdf_dynadv_ubs
   IMPLICIT NONE
 
   INTEGER(KIND=4), PARAMETER                   :: wp=4
-  INTEGER(KIND=4), PARAMETER                   :: pnvarout = 2             ! number of output variables
+  INTEGER(KIND=4), PARAMETER                   :: pnvarout1 = 2            ! number of output variables (uv)
+  INTEGER(KIND=4), PARAMETER                   :: pnvarout2 = 4            ! number of output variables (ke)
   INTEGER(KIND=4)                              :: ji, jj, jk, jt           ! dummy loop indices
   INTEGER(KIND=4)                              :: it                       ! time index for vvl
   INTEGER(KIND=4)                              :: ierr                     ! working integer
@@ -33,11 +34,13 @@ PROGRAM cdf_dynadv_ubs
   INTEGER(KIND=4)                              :: jpim1, jpjm1, jpkm1      ! index for computation of grad/div
   INTEGER(KIND=4)                              :: jkkm1=1, jkk=2, jkkp1=3  ! for swapping the levels
   INTEGER(KIND=4)                              :: jpkk=3                   ! number of level to load (jkkm1, jkk, jkkp1)
-  INTEGER(KIND=4)                              :: ncout_u, ncout_v, ncout_ke ! ncid of output file
-  INTEGER(KIND=4), DIMENSION(pnvarout)         :: ipk                      ! level of output variables
-  INTEGER(KIND=4), DIMENSION(pnvarout)         :: id_varout_u              ! id of output variables (u-comp)
-  INTEGER(KIND=4), DIMENSION(pnvarout)         :: id_varout_v              ! id of output variables (v-comp)
-  INTEGER(KIND=4), DIMENSION(pnvarout)         :: id_varout_ke             ! id of output variables (ke-comp)
+  INTEGER(KIND=4)                              :: ncout_u, ncout_v         ! ncid of output file
+  INTEGER(KIND=4)                              :: ncout_ke                 ! ncid of output file
+  INTEGER(KIND=4), DIMENSION(pnvarout1)        :: ipk1                     ! level of output variables
+  INTEGER(KIND=4), DIMENSION(pnvarout2)        :: ipk2                     ! level of output variables
+  INTEGER(KIND=4), DIMENSION(pnvarout1)        :: id_varout_u              ! id of output variables (u-comp)
+  INTEGER(KIND=4), DIMENSION(pnvarout1)        :: id_varout_v              ! id of output variables (v-comp)
+  INTEGER(KIND=4), DIMENSION(pnvarout2)        :: id_varout_ke             ! id of output variables (ke-comp)
 
   REAL(wp), PARAMETER                          :: gamma1 = 1._wp/3._wp     ! =1/4 quick      ; =1/3  3rd order UBS
   REAL(wp), PARAMETER                          :: gamma2 = 1._wp/32._wp    ! =0   2nd order  ; =1/32 4th order centred
@@ -48,28 +51,32 @@ PROGRAM cdf_dynadv_ubs
   REAL(wp), DIMENSION(:,:)  , ALLOCATABLE      :: nav_lon_v, nav_lat_v     ! v-grid hor.
   REAL(wp), DIMENSION(:,:)  , ALLOCATABLE      :: ht_0                     ! Reference ocean depth at T-points
   REAL(wp), DIMENSION(:,:)  , ALLOCATABLE      :: sshn                     ! now sea surface height
-  REAL(wp), DIMENSION(:,:),   ALLOCATABLE      :: e1t, e2t                 ! horizontal metric, t-pts
-  REAL(wp), DIMENSION(:,:),   ALLOCATABLE      :: e1u, e2u                 ! horizontal metric, u-pts
-  REAL(wp), DIMENSION(:,:),   ALLOCATABLE      :: e1v, e2v                 ! horizontal metric, v-pts
-  REAL(wp), DIMENSION(:,:),   ALLOCATABLE      :: e12t, r1_e12u, r1_e12v   ! face area at t-pts and inverse at u- v- pts
-  REAL(wp), DIMENSION(:,:), ALLOCATABLE      :: e3t_0, e3u_0, e3v_0      ! vet. metrics at rest (without vvl)
-  REAL(wp), DIMENSION(:,:), ALLOCATABLE      :: e3u, e3v, e3t            ! vet. metrics, u- v- t- pts
-  REAL(wp), DIMENSION(:,:), ALLOCATABLE      :: tmask, fmask             ! mesh masks
-  REAL(wp), DIMENSION(:,:), ALLOCATABLE      :: umask, vmask             ! mesh masks
+  REAL(wp), DIMENSION(:,:)  , ALLOCATABLE      :: sshnm                    ! now sea surface height - mean
+  REAL(wp), DIMENSION(:,:)  , ALLOCATABLE      :: e1t, e2t                 ! horizontal metric, t-pts
+  REAL(wp), DIMENSION(:,:)  , ALLOCATABLE      :: e1u, e2u                 ! horizontal metric, u-pts
+  REAL(wp), DIMENSION(:,:)  , ALLOCATABLE      :: e1v, e2v                 ! horizontal metric, v-pts
+  REAL(wp), DIMENSION(:,:)  , ALLOCATABLE      :: e12t, r1_e12u, r1_e12v   ! face area at t-pts and inverse at u- v- pts
+  REAL(wp), DIMENSION(:,:)  , ALLOCATABLE      :: e3t_0, e3u_0, e3v_0      ! vet. metrics at rest (without vvl)
+  REAL(wp), DIMENSION(:,:)  , ALLOCATABLE      :: e3u, e3v, e3t            ! vet. metrics, u- v- t- pts
+  REAL(wp), DIMENSION(:,:)  , ALLOCATABLE      :: tmask, fmask             ! mesh masks
+  REAL(wp), DIMENSION(:,:)  , ALLOCATABLE      :: umask, vmask             ! mesh masks
   REAL(wp), DIMENSION(:,:,:), ALLOCATABLE      :: wn                       ! 3D vert. velocity (now)
-  REAL(wp), DIMENSION(:,:,:), ALLOCATABLE, TARGET  :: un, vn               ! 3D hz. velocity (now)
-  REAL(wp), DIMENSION(:,:,:), POINTER          :: ub, vb                   ! 3D hz. velocity (before)
-  !REAL(wp), DIMENSION(:,:,:), ALLOCATABLE      :: un, vn                   ! 3D hz. velocity (now)
-  !REAL(wp), DIMENSION(:,:,:), ALLOCATABLE      :: ub, vb                   ! 3D hz. velocity (before)
-  REAL(wp), DIMENSION(:,:), ALLOCATABLE      :: adv_h_u, adv_z_u         ! hor. and vert. advection of u-mom. (outputs)
-  REAL(wp), DIMENSION(:,:), ALLOCATABLE      :: adv_h_v, adv_z_v         ! hor. and vert. advection of v-mom. (outputs)
-  REAL(wp), DIMENSION(:,:), ALLOCATABLE      :: adv_h_ke, adv_z_ke       ! hor. and vert. advection of KE     (outputs)
+  REAL(wp), DIMENSION(:,:,:), ALLOCATABLE      :: wnm                      ! 3D vert. velocity (now) - mean
+  REAL(wp), DIMENSION(:,:,:), ALLOCATABLE      :: un, vn                   ! 3D hz. velocity (now)
+  REAL(wp), DIMENSION(:,:,:), ALLOCATABLE      :: tmpu, tmpv               ! tmeporary
+  REAL(wp), DIMENSION(:,:,:), ALLOCATABLE      :: unm, vnm                 ! 3D hz. velocity (now) - mean
+  REAL(wp), DIMENSION(:,:)  , ALLOCATABLE      :: adv_h_u, adv_z_u         ! hor. and vert. advection of u-mom. (outputs)
+  REAL(wp), DIMENSION(:,:)  , ALLOCATABLE      :: adv_h_v, adv_z_v         ! hor. and vert. advection of v-mom. (outputs)
+  REAL(wp), DIMENSION(:,:)  , ALLOCATABLE      :: adv_h_ke, adv_z_ke       ! hor. and vert. advection of KE     (outputs)
 
-  CHARACTER(LEN=256)                           :: cf_tfil                  ! temperature netcdf file name (for mesh only)
-  CHARACTER(LEN=256)                           :: cf_ufil                  ! zonal vel  netcdf file name
-  CHARACTER(LEN=256)                           :: cf_vfil                  ! merid vel  netcdf file name
-  CHARACTER(LEN=255)                           :: cf_wfil                  ! vert. vel  netcdf file name
-  CHARACTER(LEN=256)                           :: cf_sshfil                ! ssh        netcdf file name (for vvl)
+  CHARACTER(LEN=256)                           :: cf_tt                    ! temperature netcdf file name (for mesh only)
+  CHARACTER(LEN=256)                           :: cf_uu                    ! zonal vel  netcdf file name
+  CHARACTER(LEN=256)                           :: cf_um                    ! MEAN zonal vel  netcdf file name
+  CHARACTER(LEN=256)                           :: cf_vv                    ! merd vel  netcdf file name
+  CHARACTER(LEN=256)                           :: cf_vm                    ! MEAN merd vel  netcdf file name
+  CHARACTER(LEN=256)                           :: cf_ww                    ! vert. vel  netcdf file name
+  CHARACTER(LEN=256)                           :: cf_wm                    ! MEAN vert. vel  netcdf file name
+  CHARACTER(LEN=256)                           :: cf_ssh                   ! Sea surface height
   CHARACTER(LEN=255)                           :: cf_mh                    ! mesh       netcdf file name
   CHARACTER(LEN=255)                           :: cf_mz                    ! mesh       netcdf file name
   CHARACTER(LEN=255)                           :: cf_mask                  ! mask       netcdf file name
@@ -79,45 +86,60 @@ PROGRAM cdf_dynadv_ubs
   CHARACTER(LEN=256)                           :: cf_out_ke='adv_ke.nc'    ! output file name (ke-comp)
   CHARACTER(LEN=256)                           :: cldum                    ! dummy character variable
   CHARACTER(LEN=256)                           :: cglobal                  ! global attribute
+  CHARACTER(LEN=256)                           :: eddymean='full'          ! select what to compute
 
-  TYPE (variable), DIMENSION(pnvarout)         :: stypvar                  ! structure for attibutes (u-comp)
-  TYPE (variable), DIMENSION(pnvarout)         :: stypvar2                 ! structure for attibutes (v-comp)
-  TYPE (variable), DIMENSION(pnvarout)         :: stypvar3                 ! structure for attibutes (ke-comp)
+  TYPE (variable), DIMENSION(pnvarout1)        :: stypvar1                 ! structure for attibutes (u-comp)
+  TYPE (variable), DIMENSION(pnvarout1)        :: stypvar2                 ! structure for attibutes (v-comp)
+  TYPE (variable), DIMENSION(pnvarout2)        :: stypvar3                 ! structure for attibutes (ke-comp)
 
   LOGICAL                                      :: l_w   =.FALSE.           ! flag for vertical location of bn2
   LOGICAL                                      :: lchk                     ! check missing files
   LOGICAL                                      :: lfull =.FALSE.           ! full step flag
   LOGICAL                                      :: lnc4  =.FALSE.           ! full step flag
+  LOGICAL                                      :: nodiss  =.FALSE.         ! to remove dissipation term in UBS scheme
   !!----------------------------------------------------------------------
   CALL ReadCdfNames()
 
   narg= iargc()
   IF ( narg == 0 ) THEN
-     PRINT *,' usage : cdf_dynadv_ubs -t T-file -u U-file -v V-file -w W-file -ssh SSH-file ...'
+     PRINT *,' usage : cdf_dynadv_ubs -t T-file -u U-file -v V-file -w W-file SSH-file ...'
+     PRINT *,'          -um Um-file -v V-file -vm Vm-file ...'
      PRINT *,'          -mh MESH-file -mz MESZ-file -mask MASK-file -bathy BATHY-file ...'
-     PRINT *,'          -o_u OUT-file-u -o_v OUT-file-v -o_ke OUT-file-ke'
+     PRINT *,'          -o_u OUT-file-u -o_v OUT-file-v -o_ke1 OUT-file-ke1 -o_ke2 OUT-file-ke2 ...'
+     PRINT *,'          -em eddy-mean_option -nodiss'
      PRINT *,'      '
      PRINT *,'     PURPOSE :'
-     PRINT *,'      Compute the now momentum advection trend in flux form.'
+     PRINT *,'      Compute the momentum/KE advection trend following UBS advection scheme '
+     PRINT *,'      of Shchepetkin & McWilliams (2005).'
+     PRINT *,'      Options are provided for computing the eddy/mean decompositions (-em),'
+     PRINT *,'      and remove the diffusive term included in this advective scheme (-nodiss).'
      PRINT *,'      '
      PRINT *,'     ARGUMENTS :'
-     PRINT *,'       -t T-file          : netcdf file for temperature (for mesh only)'
-     PRINT *,'       -u U-file          : netcdf file for zonal velocity'
-     PRINT *,'       -v V-file          : netcdf file for meridional velocity'
-     PRINT *,'       -w W-file          : netcdf file for vertical velocity'
-     PRINT *,'       -ssh SSH-file      : netcdf file for SSH (for vvl recomputation of vert. grid)'
+     PRINT *,'       -t T-file          : netcdf file for      temperature (for mesh only)'
+     PRINT *,'       -u U-file          : netcdf file for      zonal velocity'
+     PRINT *,'       -v V-file          : netcdf file for      meridional velocity'
+     PRINT *,'       -w W-file          : netcdf file for      vertical velocity'
+     PRINT *,'       -ssh SSH-file      : netcdf file for      SSH (for vvl recomputation of vert. grid)'
      PRINT *,'       -mh MESH-file      : netcdf file for horizontal mesh'
      PRINT *,'       -mz MESZ-file      : netcdf file for vertical mesh'
      PRINT *,'       -mask MASK-file    : netcdf file for mask'
      PRINT *,'       -bathy BATHY-file  : netcdf file for model bathymetry'
-     PRINT *,'       -o_u OUT-file      : netcdf file for advection term for u-momentum'
-     PRINT *,'       -o_v OUT-file      : netcdf file for advection term for v-momentum'
-     PRINT *,'       -o_ke OUT-file     : netcdf file for advection term for KE'
      PRINT *,'      '
      PRINT *,'     OPTIONS :'
+     PRINT *,'       -em                : Eddy-mean option (full, mean-mean, eddy-mean, mean-eddy, eddy-eddy)'
+     PRINT *,'             --- For eddy-mean decomposition, no need if the option em=full'
+     PRINT *,'       -um Um-file        : netcdf file for MEAN zonal velocity'
+     PRINT *,'       -vm Vm-file        : netcdf file for MEAN meridional velocity'
+     PRINT *,'       -wm Wm-file        : netcdf file for MEAN vertical velocity'
+     PRINT *,'             ---  ' 
+     PRINT *,'       -nodiss            : To remove dissipation term in the UBS advection scheme'
      PRINT *,'      '
      PRINT *,'     OUTPUT : '
      PRINT *,'       netcdf file : '
+     PRINT *,'       -o_u OUT-file      : netcdf file for advection term for u-momentum'
+     PRINT *,'       -o_v OUT-file      : netcdf file for advection term for v-momentum'
+     PRINT *,'       -o_ke1 OUT-file    : netcdf file for advection term for KE1 (ubar*putrd + vbar*pvtrd)'
+     PRINT *,'       -o_ke2 OUT-file    : netcdf file for advection term for KE2 (upr*putrd + vpr*pvtrd)'
      PRINT *,'      '
      PRINT *,'     SEE ALSO :'
      PRINT *,'      '
@@ -130,11 +152,15 @@ PROGRAM cdf_dynadv_ubs
   DO WHILE ( ijarg <= narg ) 
      CALL getarg(ijarg, cldum) ; ijarg = ijarg + 1
      SELECT CASE (cldum)
-     CASE ('-t'        ) ; CALL getarg( ijarg, cf_tfil ) ; ijarg=ijarg+1
-     CASE ('-u'        ) ; CALL getarg( ijarg, cf_ufil ) ; ijarg=ijarg+1
-     CASE ('-v'        ) ; CALL getarg( ijarg, cf_vfil ) ; ijarg=ijarg+1
-     CASE ('-w'        ) ; CALL getarg( ijarg, cf_wfil ) ; ijarg=ijarg+1
-     CASE ('-ssh'      ) ; CALL getarg( ijarg, cf_sshfil); ijarg=ijarg+1
+     CASE ('-t'        ) ; CALL getarg( ijarg, cf_tt ) ; ijarg=ijarg+1
+     CASE ('-u'        ) ; CALL getarg( ijarg, cf_uu ) ; ijarg=ijarg+1
+     CASE ('-v'        ) ; CALL getarg( ijarg, cf_vv ) ; ijarg=ijarg+1
+     CASE ('-w'        ) ; CALL getarg( ijarg, cf_ww ) ; ijarg=ijarg+1
+     CASE ('-ssh'      ) ; CALL getarg( ijarg, cf_ssh) ; ijarg=ijarg+1
+     CASE ('-um'       ) ; CALL getarg( ijarg, cf_um ) ; ijarg=ijarg+1
+     CASE ('-vm'       ) ; CALL getarg( ijarg, cf_vm ) ; ijarg=ijarg+1
+     CASE ('-wm'       ) ; CALL getarg( ijarg, cf_wm ) ; ijarg=ijarg+1
+        !
      CASE ('-mh'       ) ; CALL getarg( ijarg, cf_mh   ) ; ijarg=ijarg+1
      CASE ('-mz'       ) ; CALL getarg( ijarg, cf_mz   ) ; ijarg=ijarg+1
      CASE ('-mask'     ) ; CALL getarg( ijarg, cf_mask ) ; ijarg=ijarg+1
@@ -144,16 +170,18 @@ PROGRAM cdf_dynadv_ubs
      CASE ( '-o_u'    ) ; CALL getarg(ijarg, cf_out_u ) ; ijarg = ijarg + 1
      CASE ( '-o_v'    ) ; CALL getarg(ijarg, cf_out_v ) ; ijarg = ijarg + 1
      CASE ( '-o_ke'   ) ; CALL getarg(ijarg, cf_out_ke) ; ijarg = ijarg + 1
-     CASE ( '-nc4'  ) ; lnc4    = .TRUE.
+     CASE ( '-em'     ) ; CALL getarg(ijarg, eddymean  ); ijarg = ijarg + 1
+     CASE ( '-nodiss' ) ; nodiss  = .TRUE.              ; ijarg = ijarg + 1
+     CASE ( '-nc4'    ) ; lnc4    = .TRUE.
      CASE DEFAULT     ; PRINT *,' ERROR : ', TRIM(cldum),' : unknown option.' ; STOP 99
      END SELECT
   END DO
 
   !-- get dimensions (all files must have the same dimension that U-file) --
-  jpiglo = getdim (cf_ufil, cn_x)
-  jpjglo = getdim (cf_ufil, cn_y)
-  jpk    = getdim (cf_ufil, cn_z)
-  jpt    = getdim (cf_ufil, cn_t)
+  jpiglo = getdim (cf_uu, cn_x)
+  jpjglo = getdim (cf_uu, cn_y)
+  jpk    = getdim (cf_uu, cn_z)
+  jpt    = getdim (cf_uu, cn_t)
   jpim1 = jpiglo-1
   jpjm1 = jpjglo-1
   jpkm1 = jpk-1
@@ -163,10 +191,31 @@ PROGRAM cdf_dynadv_ubs
   PRINT *, 'jpjglo =', jpjglo
   PRINT *, 'jpk    =', jpk
   PRINT *, 'jpt    =', jpt
+  !
+  IF ( nodiss ) THEN
+          PRINT*, '-- DO NOT compute dissipation --'
+  ELSE
+          PRINT*, '-- Compute dissipation --'
+  END IF
+  !
+  SELECT CASE (eddymean)
+  CASE ('full' ) ;
+          PRINT *, 'Copmute FULL advection'
+  CASE ('mean-mean') ;
+          PRINT *, 'Compute MEAN-MEAN advection components'
+  CASE ('mean-eddy') ;
+          PRINT *, 'Compute MEAN-EDDY advection components'
+  CASE ('eddy-mean') ;
+          PRINT *, 'Compute EDDY-MEAN advection components'
+  CASE ('eddy-eddy') ;
+          PRINT *, 'Compute EDDY-EDDY advection components'
+  CASE DEFAULT ; 
+          PRINT *,' ERROR : ', TRIM(eddymean),' : unknown option.' ; STOP 99
+  END SELECT
 
   !-- Allocate --
   ! mesh
-  ALLOCATE( deptht(jpk)                   , depthu(jpk)                   , depthv(jpk)                    )
+  ALLOCATE( deptht(jpk)                   , depthu(jpk)                    , depthv(jpk)                    )
   ALLOCATE( nav_lon_t(jpiglo, jpjglo)     , nav_lat_t(jpiglo, jpjglo)      )
   ALLOCATE( nav_lon_u(jpiglo, jpjglo)     , nav_lat_u(jpiglo, jpjglo)      )
   ALLOCATE( nav_lon_v(jpiglo, jpjglo)     , nav_lat_v(jpiglo, jpjglo)      )
@@ -176,33 +225,40 @@ PROGRAM cdf_dynadv_ubs
   ALLOCATE( e1v(jpiglo, jpjglo)           , e2v(jpiglo, jpjglo)            )
   ALLOCATE( e12t(jpiglo, jpjglo)                                           )
   ALLOCATE( r1_e12u(jpiglo, jpjglo)       , r1_e12v(jpiglo, jpjglo)        )
-  ALLOCATE( e3t_0(jpiglo, jpjglo)    , e3t(jpiglo, jpjglo)          )
-  ALLOCATE( e3u_0( jpiglo, jpjglo)   , e3v_0(jpiglo, jpjglo)     )
-  ALLOCATE( e3u(jpiglo, jpjglo)      , e3v(jpiglo, jpjglo)       )
-  ALLOCATE( tmask(jpiglo, jpjglo)    , fmask(jpiglo, jpjglo)     )
-  ALLOCATE( umask(jpiglo, jpjglo)    , vmask(jpiglo, jpjglo)     )
+  ALLOCATE( e3t_0(jpiglo, jpjglo)         , e3t(jpiglo, jpjglo)            )
+  ALLOCATE( e3u_0( jpiglo, jpjglo)        , e3v_0(jpiglo, jpjglo)          )
+  ALLOCATE( e3u(jpiglo, jpjglo)           , e3v(jpiglo, jpjglo)            )
+  ALLOCATE( tmask(jpiglo, jpjglo)         , fmask(jpiglo, jpjglo)          )
+  ALLOCATE( umask(jpiglo, jpjglo)         , vmask(jpiglo, jpjglo)          )
   !! variables
   ALLOCATE( sshn(jpiglo, jpjglo)                                           )
-  ALLOCATE( un(jpiglo, jpjglo, jpkk)       , vn(jpiglo, jpjglo, jpkk)        )
-  !ALLOCATE( ub(jpiglo, jpjglo, jpkk)       , vb(jpiglo, jpjglo, jpkk)        )
-  ALLOCATE( wn(jpiglo, jpjglo, jpkk)                                        )
+  ALLOCATE( un(jpiglo, jpjglo, jpkk)      , vn(jpiglo, jpjglo, jpkk)       )
+  ALLOCATE( wn(jpiglo, jpjglo, jpkk)                                       )
+  IF ( eddymean .NE. 'full' ) THEN
+     ALLOCATE( sshnm(jpiglo, jpjglo)                                       )
+     ALLOCATE( unm(jpiglo, jpjglo, jpkk)  , vnm(jpiglo, jpjglo, jpkk)      )
+     ALLOCATE( wnm(jpiglo, jpjglo, jpkk)                                   )
+  END IF 
+  IF ( nodiss ) THEN
+     ALLOCATE( tmpu(jpiglo, jpjglo, jpkk) , tmpv(jpiglo, jpjglo, jpkk)     )
+  END IF
   !
-  ALLOCATE( adv_h_u(jpiglo, jpjglo)  , adv_z_u(jpiglo, jpjglo)   )
-  ALLOCATE( adv_h_v(jpiglo, jpjglo)  , adv_z_v(jpiglo, jpjglo)   )
-  ALLOCATE( adv_h_ke(jpiglo, jpjglo) , adv_z_ke(jpiglo, jpjglo)  )
+  ALLOCATE( adv_h_u(jpiglo, jpjglo)       , adv_z_u(jpiglo, jpjglo)        )
+  ALLOCATE( adv_h_v(jpiglo, jpjglo)       , adv_z_v(jpiglo, jpjglo)        )
+  ALLOCATE( adv_h_ke(jpiglo, jpjglo)      , adv_z_ke(jpiglo, jpjglo)       )
 
 
   !!-- loading -- 
   PRINT *, '-- LOAD VARIABLES --'
-  nav_lon_t    = getvar(cf_tfil, 'nav_lon', 1, jpiglo, jpjglo)
-  nav_lat_t    = getvar(cf_tfil, 'nav_lat', 1, jpiglo, jpjglo)
-  deptht       = getvar1d(cf_tfil, cn_vdeptht , jpk)
-  nav_lon_u    = getvar(cf_ufil, 'nav_lon', 1, jpiglo, jpjglo)
-  nav_lat_u    = getvar(cf_ufil, 'nav_lat', 1, jpiglo, jpjglo)
-  depthu       = getvar1d(cf_ufil, cn_vdepthu , jpk)
-  nav_lon_v    = getvar(cf_vfil, 'nav_lon', 1, jpiglo, jpjglo)
-  nav_lat_v    = getvar(cf_vfil, 'nav_lat', 1, jpiglo, jpjglo)
-  depthv       = getvar1d(cf_vfil, cn_vdepthv , jpk)
+  nav_lon_t    = getvar(cf_tt, 'nav_lon', 1, jpiglo, jpjglo)
+  nav_lat_t    = getvar(cf_tt, 'nav_lat', 1, jpiglo, jpjglo)
+  deptht       = getvar1d(cf_tt, cn_vdeptht , jpk)
+  nav_lon_u    = getvar(cf_uu, 'nav_lon', 1, jpiglo, jpjglo)
+  nav_lat_u    = getvar(cf_uu, 'nav_lat', 1, jpiglo, jpjglo)
+  depthu       = getvar1d(cf_uu, cn_vdepthu , jpk)
+  nav_lon_v    = getvar(cf_vv, 'nav_lon', 1, jpiglo, jpjglo)
+  nav_lat_v    = getvar(cf_vv, 'nav_lat', 1, jpiglo, jpjglo)
+  depthv       = getvar1d(cf_vv, cn_vdepthv , jpk)
   ht_0(:,:)    = getvar(cf_bathy, 'gdepw_0', 1, jpiglo, jpjglo )
   !- hz. mesh -
   e1t(:,:)     = getvar(cf_mh  , 'e1t'  , 1, jpiglo, jpjglo)
@@ -215,11 +271,15 @@ PROGRAM cdf_dynadv_ubs
   r1_e12u(:,:) = 1._wp / (e1u(:,:) * e2u(:,:))
   r1_e12v(:,:) = 1._wp / (e1v(:,:) * e2v(:,:))
 
+  !
+  IF ( nodiss ) THEN
+     tmpu(:,:,:) = 0._wp       ! remove the dissipation term in the UBS scheme
+     tmpv(:,:,:) = 0._wp       ! 
+  END IF
+
   !-- Creat output netcdf files to fill in --
   PRINT *, '-- Creat output --'
   CALL CreateOutput
-
-  PRINT *, 'toto'
 
   DO jk = 1, jpkm1
    PRINT *, '-- klayer: ', jk
@@ -243,89 +303,176 @@ PROGRAM cdf_dynadv_ubs
    fmask(:,:) = getvar(cf_mask, 'fmask' , jk, jpiglo, jpjglo )
 
    DO jt = 1,jpt
-     !PRINT *, '======= time-step = ', jt
-
-     !-- recomputed vert. metric due to non-linear free surface (VVL) --
-     ! from domvvl.F90 -->> e3t = e3t_0*(1+sshn/ht_0)
-     !IF ( jk == 1 ) THEN
-       !PRINT *, '-- Recompute vert. mesh --'
-     sshn(:,:)     = getvar(cf_sshfil  , cn_sossheig, 1, jpiglo, jpjglo, ktime=jt )
-     !ENDIF
+     sshn(:,:)     = getvar(cf_ssh  , cn_sossheig, 1, jpiglo, jpjglo, ktime=jt )
      e3t(:,:) = e3t_0(:,:) * (1 + sshn/ht_0)
      !- at u- and v- pts (domvvl.F90) -
      e3u(:,:) = e3u_0(:,:)
      e3v(:,:) = e3v_0(:,:)
-     !DO jk = 1, jpk
-        DO jj = 1, jpjm1
-           DO ji = 1, jpim1   ! vector opt.
-              e3u(ji,jj) = e3u_0(ji,jj) + 0.5_wp * umask(ji,jj) * r1_e12u(ji,jj)                 &
-                 &                       * (   e12t(ji  ,jj) * ( e3t(ji  ,jj) - e3t_0(ji  ,jj) )    &
-                 &                           + e12t(ji+1,jj) * ( e3t(ji+1,jj) - e3t_0(ji+1,jj) ) )
-              e3v(ji,jj) = e3v_0(ji,jj) + 0.5_wp * vmask(ji,jj) * r1_e12v(ji,jj)                 &
-                 &                       * (   e12t(ji,jj  ) * ( e3t(ji,jj  ) - e3t_0(ji,jj  ) )    &
-                 &                           + e12t(ji,jj+1) * ( e3t(ji,jj+1) - e3t_0(ji,jj+1) ) )
-           END DO
+     DO jj = 1, jpjm1
+        DO ji = 1, jpim1   ! vector opt.
+           e3u(ji,jj) = e3u_0(ji,jj) + 0.5_wp * umask(ji,jj) * r1_e12u(ji,jj)                 &
+              &                       * (   e12t(ji  ,jj) * ( e3t(ji  ,jj) - e3t_0(ji  ,jj) )    &
+              &                           + e12t(ji+1,jj) * ( e3t(ji+1,jj) - e3t_0(ji+1,jj) ) )
+           e3v(ji,jj) = e3v_0(ji,jj) + 0.5_wp * vmask(ji,jj) * r1_e12v(ji,jj)                 &
+              &                       * (   e12t(ji,jj  ) * ( e3t(ji,jj  ) - e3t_0(ji,jj  ) )    &
+              &                           + e12t(ji,jj+1) * ( e3t(ji,jj+1) - e3t_0(ji,jj+1) ) )
         END DO
-     !END DO
+     END DO
 
      !-- Load variables --
-     !PRINT *, '-- Load hz. vel --'
      IF ( jk == 1 ) THEN
+        !- variable -
         un(:,:,jkkm1) = 0._wp
         vn(:,:,jkkm1) = 0._wp
         wn(:,:,jkkm1) = 0._wp
-        un(:,:,jkk  ) = getvar(cf_ufil, cn_vozocrtx, jk  , jpiglo, jpjglo, ktime=jt )
-        vn(:,:,jkk  ) = getvar(cf_vfil, cn_vomecrty, jk  , jpiglo, jpjglo, ktime=jt )
-        wn(:,:,jkk  ) = getvar(cf_wfil, cn_vovecrtz, jk  , jpiglo, jpjglo, ktime=jt )
-        un(:,:,jkkp1) = getvar(cf_ufil, cn_vozocrtx, jk+1, jpiglo, jpjglo, ktime=jt )
-        vn(:,:,jkkp1) = getvar(cf_vfil, cn_vomecrty, jk+1, jpiglo, jpjglo, ktime=jt )
-        wn(:,:,jkkp1) = getvar(cf_wfil, cn_vovecrtz, jk+1, jpiglo, jpjglo, ktime=jt )
+        un(:,:,jkk  ) = getvar(cf_uu, cn_vozocrtx, jk  , jpiglo, jpjglo, ktime=jt )
+        vn(:,:,jkk  ) = getvar(cf_vv, cn_vomecrty, jk  , jpiglo, jpjglo, ktime=jt )
+        wn(:,:,jkk  ) = getvar(cf_ww, cn_vovecrtz, jk  , jpiglo, jpjglo, ktime=jt )
+        un(:,:,jkkp1) = getvar(cf_uu, cn_vozocrtx, jk+1, jpiglo, jpjglo, ktime=jt )
+        vn(:,:,jkkp1) = getvar(cf_vv, cn_vomecrty, jk+1, jpiglo, jpjglo, ktime=jt )
+        wn(:,:,jkkp1) = getvar(cf_ww, cn_vovecrtz, jk+1, jpiglo, jpjglo, ktime=jt )
+        !- ensemble mean -
+        IF ( eddymean .NE. 'full' ) THEN
+           unm(:,:,jkkm1) = 0._wp
+           vnm(:,:,jkkm1) = 0._wp
+           wnm(:,:,jkkm1) = 0._wp
+           unm(:,:,jkk  ) = getvar(cf_um, cn_vozocrtx, jk  , jpiglo, jpjglo, ktime=jt )
+           vnm(:,:,jkk  ) = getvar(cf_vm, cn_vomecrty, jk  , jpiglo, jpjglo, ktime=jt )
+           wnm(:,:,jkk  ) = getvar(cf_wm, cn_vovecrtz, jk  , jpiglo, jpjglo, ktime=jt )
+           unm(:,:,jkkp1) = getvar(cf_um, cn_vozocrtx, jk+1, jpiglo, jpjglo, ktime=jt )
+           vnm(:,:,jkkp1) = getvar(cf_vm, cn_vomecrty, jk+1, jpiglo, jpjglo, ktime=jt )
+           wnm(:,:,jkkp1) = getvar(cf_wm, cn_vovecrtz, jk+1, jpiglo, jpjglo, ktime=jt )
+        END IF
      ELSE
+        !- variable -
         un(:,:,jkkm1) = un(:,:,jkk  )
         vn(:,:,jkkm1) = vn(:,:,jkk  )
         wn(:,:,jkkm1) = wn(:,:,jkk  )
         un(:,:,jkk  ) = un(:,:,jkkp1)
         vn(:,:,jkk  ) = vn(:,:,jkkp1)
         wn(:,:,jkk  ) = wn(:,:,jkkp1)
-        un(:,:,jkkp1) = getvar(cf_ufil, cn_vozocrtx, jk+1, jpiglo, jpjglo, ktime=jt )
-        vn(:,:,jkkp1) = getvar(cf_vfil, cn_vomecrty, jk+1, jpiglo, jpjglo, ktime=jt )
-        wn(:,:,jkkp1) = getvar(cf_wfil, cn_vovecrtz, jk+1, jpiglo, jpjglo, ktime=jt )
+        un(:,:,jkkp1) = getvar(cf_uu, cn_vozocrtx, jk+1, jpiglo, jpjglo, ktime=jt )
+        vn(:,:,jkkp1) = getvar(cf_vv, cn_vomecrty, jk+1, jpiglo, jpjglo, ktime=jt )
+        wn(:,:,jkkp1) = getvar(cf_ww, cn_vovecrtz, jk+1, jpiglo, jpjglo, ktime=jt )
+        !- ensemble mean -
+        IF ( eddymean .NE. 'full' ) THEN
+           unm(:,:,jkkm1) = unm(:,:,jkk  )
+           vnm(:,:,jkkm1) = vnm(:,:,jkk  )
+           wnm(:,:,jkkm1) = wnm(:,:,jkk  )
+           unm(:,:,jkk  ) = unm(:,:,jkkp1)
+           vnm(:,:,jkk  ) = vnm(:,:,jkkp1)
+           wnm(:,:,jkk  ) = wnm(:,:,jkkp1)
+           unm(:,:,jkkp1) = getvar(cf_um, cn_vozocrtx, jk+1, jpiglo, jpjglo, ktime=jt )
+           vnm(:,:,jkkp1) = getvar(cf_vm, cn_vomecrty, jk+1, jpiglo, jpjglo, ktime=jt )
+           wnm(:,:,jkkp1) = getvar(cf_wm, cn_vovecrtz, jk+1, jpiglo, jpjglo, ktime=jt )
+        END IF
      ENDIF
-     !un(:,:,:)   = getvar3d(cf_ufil, cn_vozocrtx, jpiglo, jpjglo, jpk, ktime=jt )
-     !vn(:,:,:)   = getvar3d(cf_vfil, cn_vomecrty, jpiglo, jpjglo, jpk, ktime=jt )
-     !wn(:,:,:)   = getvar3d(cf_wfil, cn_vovecrtz, jpiglo, jpjglo, jpk, ktime=jt )
-     ub => un
-     vb => vn
-     !ub(:,:,:)   = getvar3d(cf_ufil, cn_vozocrtx, jpiglo, jpjglo, jpk, ktime=jt-1 )
-     !vb(:,:,:)   = getvar3d(cf_vfil, cn_vomecrty, jpiglo, jpjglo, jpk, ktime=jt-1 )
 
-
-     !-- Advection trends --
-     !PRINT *, '-- Compute advection trends --'
-     CALL dyn_adv_ubs( jt, jk )
-
-     !-- Construct KE --
-     adv_h_ke(:,:) = 0._wp
-     adv_z_ke(:,:) = 0._wp
-     CALL trd_ken( adv_h_u, adv_h_v, adv_h_ke ) 
-     CALL trd_ken( adv_z_u, adv_z_v, adv_z_ke ) 
-
-     !-- output trends --
-     !DO jk = 1, jpk
-        !- u-mom advection -
-        ierr = putvar(ncout_u, id_varout_u(1), adv_h_u(:,:), jk, jpiglo, jpjglo, ktime=jt )
-        ierr = putvar(ncout_u, id_varout_u(2), adv_z_u(:,:), jk, jpiglo, jpjglo, ktime=jt )
-        !- v-mom advection -
-        ierr = putvar(ncout_v, id_varout_v(1), adv_h_v(:,:), jk, jpiglo, jpjglo, ktime=jt )
-        ierr = putvar(ncout_v, id_varout_v(2), adv_z_v(:,:), jk, jpiglo, jpjglo, ktime=jt )
-        !- KE-mom advection -
+     !-- Advection and KE trends --
+     SELECT CASE (eddymean)
+     CASE ('full' ) ;
+        IF ( nodiss ) THEN
+           CALL dyn_adv_ubs( jt, jk, tmpu, tmpv, un, vn, wn, un, vn )
+        ELSE
+           CALL dyn_adv_ubs( jt, jk, un, vn, un, vn, wn, un, vn )
+        END IF
+        ierr = putvar(ncout_u , id_varout_u(1) , adv_h_u(:,:) , jk, jpiglo, jpjglo, ktime=jt )
+        ierr = putvar(ncout_u , id_varout_u(2) , adv_z_u(:,:) , jk, jpiglo, jpjglo, ktime=jt )
+        ierr = putvar(ncout_v , id_varout_v(1) , adv_h_v(:,:) , jk, jpiglo, jpjglo, ktime=jt )
+        ierr = putvar(ncout_v , id_varout_v(2) , adv_z_v(:,:) , jk, jpiglo, jpjglo, ktime=jt )
+        ! KE
+        CALL trd_ken( adv_h_u, adv_h_v, adv_h_ke, un, vn )
+        CALL trd_ken( adv_z_u, adv_z_v, adv_z_ke, un, vn )
         ierr = putvar(ncout_ke, id_varout_ke(1), adv_h_ke(:,:), jk, jpiglo, jpjglo, ktime=jt )
         ierr = putvar(ncout_ke, id_varout_ke(2), adv_z_ke(:,:), jk, jpiglo, jpjglo, ktime=jt )
-     !ENDDO
+     CASE ('mean-mean') ;
+        IF ( nodiss ) THEN
+           CALL dyn_adv_ubs( jt, jk, tmpu, tmpv, unm, vnm, wnm, unm, vnm )
+        ELSE
+           CALL dyn_adv_ubs( jt, jk, unm, vnm, unm, vnm, wnm, unm, vnm )
+        END IF
+        ierr = putvar(ncout_u , id_varout_u(1) , adv_h_u(:,:) , jk, jpiglo, jpjglo, ktime=jt )
+        ierr = putvar(ncout_u , id_varout_u(2) , adv_z_u(:,:) , jk, jpiglo, jpjglo, ktime=jt )
+        ierr = putvar(ncout_v , id_varout_v(1) , adv_h_v(:,:) , jk, jpiglo, jpjglo, ktime=jt )
+        ierr = putvar(ncout_v , id_varout_v(2) , adv_z_v(:,:) , jk, jpiglo, jpjglo, ktime=jt )
+        ! KE  --  ubar*
+        CALL trd_ken( adv_h_u, adv_h_v, adv_h_ke, unm, vnm )
+        CALL trd_ken( adv_z_u, adv_z_v, adv_z_ke, unm, vnm )
+        ierr = putvar(ncout_ke, id_varout_ke(1), adv_h_ke(:,:), jk, jpiglo, jpjglo, ktime=jt )
+        ierr = putvar(ncout_ke, id_varout_ke(2), adv_z_ke(:,:), jk, jpiglo, jpjglo, ktime=jt )
+        ! KE  --  uprime*
+        CALL trd_ken( adv_h_u, adv_h_v, adv_h_ke, un(:,:,:)-unm(:,:,:), vn(:,:,:)-vnm(:,:,:) )
+        CALL trd_ken( adv_z_u, adv_z_v, adv_z_ke, un(:,:,:)-unm(:,:,:), vn(:,:,:)-vnm(:,:,:) )
+        ierr = putvar(ncout_ke, id_varout_ke(3), adv_h_ke(:,:), jk, jpiglo, jpjglo, ktime=jt )
+        ierr = putvar(ncout_ke, id_varout_ke(4), adv_z_ke(:,:), jk, jpiglo, jpjglo, ktime=jt )
+     CASE ('mean-eddy') ;
+        IF ( nodiss ) THEN
+           CALL dyn_adv_ubs( jt, jk, tmpu, tmpv, unm, vnm, wnm, un(:,:,:)-unm(:,:,:), vn(:,:,:)-vnm(:,:,:) )
+        ELSE
+           CALL dyn_adv_ubs( jt, jk, unm, vnm, unm, vnm, wnm, un(:,:,:)-unm(:,:,:), vn(:,:,:)-vnm(:,:,:) )
+        END IF
+        ierr = putvar(ncout_u , id_varout_u(1) , adv_h_u(:,:) , jk, jpiglo, jpjglo, ktime=jt )
+        ierr = putvar(ncout_u , id_varout_u(2) , adv_z_u(:,:) , jk, jpiglo, jpjglo, ktime=jt )
+        ierr = putvar(ncout_v , id_varout_v(1) , adv_h_v(:,:) , jk, jpiglo, jpjglo, ktime=jt )
+        ierr = putvar(ncout_v , id_varout_v(2) , adv_z_v(:,:) , jk, jpiglo, jpjglo, ktime=jt )
+        ! KE  --  ubar*
+        CALL trd_ken( adv_h_u, adv_h_v, adv_h_ke, unm, vnm )
+        CALL trd_ken( adv_z_u, adv_z_v, adv_z_ke, unm, vnm )
+        ierr = putvar(ncout_ke, id_varout_ke(1), adv_h_ke(:,:), jk, jpiglo, jpjglo, ktime=jt )
+        ierr = putvar(ncout_ke, id_varout_ke(2), adv_z_ke(:,:), jk, jpiglo, jpjglo, ktime=jt )
+        ! KE  --  uprime*
+        CALL trd_ken( adv_h_u, adv_h_v, adv_h_ke, un(:,:,:)-unm(:,:,:), vn(:,:,:)-vnm(:,:,:) )
+        CALL trd_ken( adv_z_u, adv_z_v, adv_z_ke, un(:,:,:)-unm(:,:,:), vn(:,:,:)-vnm(:,:,:) )
+        ierr = putvar(ncout_ke, id_varout_ke(3), adv_h_ke(:,:), jk, jpiglo, jpjglo, ktime=jt )
+        ierr = putvar(ncout_ke, id_varout_ke(4), adv_z_ke(:,:), jk, jpiglo, jpjglo, ktime=jt )
+     CASE ('eddy-mean') ;
+        IF ( nodiss ) THEN
+           CALL dyn_adv_ubs( jt, jk, tmpu, tmpv, un(:,:,:)-unm(:,:,:), vn(:,:,:)-vnm(:,:,:), &
+                   & wn(:,:,:)-wnm(:,:,:), unm, vnm )
+        ELSE
+           CALL dyn_adv_ubs( jt, jk, un(:,:,:)-unm(:,:,:), vn(:,:,:)-vnm(:,:,:), un(:,:,:)-unm(:,:,:), &
+                   & vn(:,:,:)-vnm(:,:,:), wn(:,:,:)-wnm(:,:,:), unm, vnm )
+        END IF
+        ierr = putvar(ncout_u , id_varout_u(1) , adv_h_u(:,:) , jk, jpiglo, jpjglo, ktime=jt )
+        ierr = putvar(ncout_u , id_varout_u(2) , adv_z_u(:,:) , jk, jpiglo, jpjglo, ktime=jt )
+        ierr = putvar(ncout_v , id_varout_v(1) , adv_h_v(:,:) , jk, jpiglo, jpjglo, ktime=jt )
+        ierr = putvar(ncout_v , id_varout_v(2) , adv_z_v(:,:) , jk, jpiglo, jpjglo, ktime=jt )
+        ! KE  --  ubar*
+        CALL trd_ken( adv_h_u, adv_h_v, adv_h_ke, unm, vnm )
+        CALL trd_ken( adv_z_u, adv_z_v, adv_z_ke, unm, vnm )
+        ierr = putvar(ncout_ke, id_varout_ke(1), adv_h_ke(:,:), jk, jpiglo, jpjglo, ktime=jt )
+        ierr = putvar(ncout_ke, id_varout_ke(2), adv_z_ke(:,:), jk, jpiglo, jpjglo, ktime=jt )
+        ! KE  --  uprime*
+        CALL trd_ken( adv_h_u, adv_h_v, adv_h_ke, un(:,:,:)-unm(:,:,:), vn(:,:,:)-vnm(:,:,:) )
+        CALL trd_ken( adv_z_u, adv_z_v, adv_z_ke, un(:,:,:)-unm(:,:,:), vn(:,:,:)-vnm(:,:,:) )
+        ierr = putvar(ncout_ke, id_varout_ke(3), adv_h_ke(:,:), jk, jpiglo, jpjglo, ktime=jt )
+        ierr = putvar(ncout_ke, id_varout_ke(4), adv_z_ke(:,:), jk, jpiglo, jpjglo, ktime=jt )
+     CASE ('eddy-eddy') ;
+        IF ( nodiss ) THEN
+           CALL dyn_adv_ubs( jt, jk, tmpu, tmpv, un(:,:,:)-unm(:,:,:), vn(:,:,:)-vnm(:,:,:), wn(:,:,:)-wnm(:,:,:), &
+                   & un(:,:,:)-unm(:,:,:), vn(:,:,:)-vnm(:,:,:) )
+        ELSE
+           CALL dyn_adv_ubs( jt, jk, un(:,:,:)-unm(:,:,:), vn(:,:,:)-vnm(:,:,:), un(:,:,:)-unm(:,:,:), &
+                   & vn(:,:,:)-vnm(:,:,:), wn(:,:,:)-wnm(:,:,:), un(:,:,:)-unm(:,:,:), vn(:,:,:)-vnm(:,:,:) )
+        END IF
+        ierr = putvar(ncout_u , id_varout_u(1) , adv_h_u(:,:) , jk, jpiglo, jpjglo, ktime=jt )
+        ierr = putvar(ncout_u , id_varout_u(2) , adv_z_u(:,:) , jk, jpiglo, jpjglo, ktime=jt )
+        ierr = putvar(ncout_v , id_varout_v(1) , adv_h_v(:,:) , jk, jpiglo, jpjglo, ktime=jt )
+        ierr = putvar(ncout_v , id_varout_v(2) , adv_z_v(:,:) , jk, jpiglo, jpjglo, ktime=jt )
+        ! KE  --  ubar*
+        CALL trd_ken( adv_h_u, adv_h_v, adv_h_ke, unm, vnm )
+        CALL trd_ken( adv_z_u, adv_z_v, adv_z_ke, unm, vnm )
+        ierr = putvar(ncout_ke, id_varout_ke(1), adv_h_ke(:,:), jk, jpiglo, jpjglo, ktime=jt )
+        ierr = putvar(ncout_ke, id_varout_ke(2), adv_z_ke(:,:), jk, jpiglo, jpjglo, ktime=jt )
+        ! KE  --  uprime*
+        CALL trd_ken( adv_h_u, adv_h_v, adv_h_ke, un(:,:,:)-unm(:,:,:), vn(:,:,:)-vnm(:,:,:) )
+        CALL trd_ken( adv_z_u, adv_z_v, adv_z_ke, un(:,:,:)-unm(:,:,:), vn(:,:,:)-vnm(:,:,:) )
+        ierr = putvar(ncout_ke, id_varout_ke(3), adv_h_ke(:,:), jk, jpiglo, jpjglo, ktime=jt )
+        ierr = putvar(ncout_ke, id_varout_ke(4), adv_z_ke(:,:), jk, jpiglo, jpjglo, ktime=jt )
+     END SELECT
 
-  ENDDO		!jt-loop
-
-  ENDDO		!jk-loop
+   ENDDO       !jt-loop
+  ENDDO        !jk-loop
  
   ierr = closeout(ncout_u)
   ierr = closeout(ncout_v)
@@ -333,7 +480,7 @@ PROGRAM cdf_dynadv_ubs
 
 CONTAINS
 
-   SUBROUTINE dyn_adv_ubs( kt, jk )
+   SUBROUTINE dyn_adv_ubs( kt, jk, u0, v0, u1, v1, w1, u2, v2 )
 !!----------------------------------------------------------------------
 !!                  ***  ROUTINE dyn_adv_ubs  ***
 !!
@@ -361,11 +508,16 @@ CONTAINS
 !! Reference : Shchepetkin & McWilliams, 2005, Ocean Modelling.
 !!----------------------------------------------------------------------
       INTEGER, INTENT(in) ::   kt     ! ocean time-step index
+      INTEGER, INTENT(in) ::   jk     ! ocean vertical level
+      REAL(wp), DIMENSION(:,:,:), INTENT(in   ) ::   u0, v0   ! U and V ocean velocities used to estimate the 
+                                                              ! upstream diffusive fluxes (should be full velocities)
+      REAL(wp), DIMENSION(:,:,:), INTENT(in   ) ::   u1, v1, w1   ! U, V and W ocean advecting velocities
+      REAL(wp), DIMENSION(:,:,:), INTENT(in   ) ::   u2, v2       ! U and V    ocean advected  velocities
 !
-      INTEGER  ::   ji, jj, jk            ! dummy loop indices
+      INTEGER  ::   ji, jj              ! dummy loop indices
       REAL(wp) ::   zbu, zbv    ! temporary scalars
       REAL(wp) ::   zui, zvj, zfuj, zfvi, zl_u, zl_v   ! temporary scalars
-      REAL(wp), POINTER, DIMENSION(:,:    ) ::  zfu, zfv
+      REAL(wp), POINTER, DIMENSION(:,:    ) ::  zfu, zfv, zfu2, zfv2
       REAL(wp), POINTER, DIMENSION(:,:,:  ) ::  zfw
       REAL(wp), POINTER, DIMENSION(:,:    ) ::  zfu_t, zfv_t, zfu_f, zfv_f
       REAL(wp), POINTER, DIMENSION(:,:,:  ) ::  zfu_uw, zfv_vw
@@ -373,6 +525,7 @@ CONTAINS
 !!----------------------------------------------------------------------
 !
       ALLOCATE( zfu(jpiglo, jpjglo)       , zfv(jpiglo, jpjglo)       )
+      ALLOCATE( zfu2(jpiglo, jpjglo)      , zfv2(jpiglo, jpjglo)      )
       ALLOCATE( zfw(jpiglo, jpjglo, jpkk)                             )
       ALLOCATE( zfu_t(jpiglo, jpjglo)     , zfv_t(jpiglo, jpjglo)     )
       ALLOCATE( zfu_f(jpiglo, jpjglo)     , zfv_f(jpiglo, jpjglo)     )
@@ -395,21 +548,21 @@ CONTAINS
       zlv_vu(:,:,:) = 0._wp
 
 !                                      ! =========================== !
-   !   DO jk = 1, jpkm1                       !  Laplacian of the velocity  !
-!                                   ! =========================== !
+                                       !  Laplacian of the velocity  !
+!                                      ! =========================== !
 !                                         ! horizontal volume fluxes
-         zfu(:,:) = e2u(:,:) * e3u(:,:) * un(:,:,jkk)
-         zfv(:,:) = e1v(:,:) * e3v(:,:) * vn(:,:,jkk)
+         zfu(:,:) = e2u(:,:) * e3u(:,:) * u1(:,:,jkk)
+         zfv(:,:) = e1v(:,:) * e3v(:,:) * v1(:,:,jkk)
 !
          DO jj = 2, jpjm1                          ! laplacian
             DO ji = 2, jpim1   ! vector opt.
 !
-               zlu_uu(ji,jj,1) = ( ub (ji+1,jj  ,jkk) - 2.*ub (ji,jj,jkk) + ub (ji-1,jj  ,jkk) ) * umask(ji,jj)
-               zlv_vv(ji,jj,1) = ( vb (ji  ,jj+1,jkk) - 2.*vb (ji,jj,jkk) + vb (ji  ,jj-1,jkk) ) * vmask(ji,jj)
-               zlu_uv(ji,jj,1) = ( ub (ji  ,jj+1,jkk) - ub (ji  ,jj  ,jkk) ) * fmask(ji  ,jj  )   &
-                  &               - ( ub (ji  ,jj  ,jkk) - ub (ji  ,jj-1,jkk) ) * fmask(ji  ,jj-1)
-               zlv_vu(ji,jj,1) = ( vb (ji+1,jj  ,jkk) - vb (ji  ,jj  ,jkk) ) * fmask(ji  ,jj  )   &
-                  &               - ( vb (ji  ,jj  ,jkk) - vb (ji-1,jj  ,jkk) ) * fmask(ji-1,jj  )
+               zlu_uu(ji,jj,1) = ( u0 (ji+1,jj  ,jkk) - 2.*u0 (ji,jj,jkk) + u0 (ji-1,jj  ,jkk) ) * umask(ji,jj)
+               zlv_vv(ji,jj,1) = ( v0 (ji  ,jj+1,jkk) - 2.*v0 (ji,jj,jkk) + v0 (ji  ,jj-1,jkk) ) * vmask(ji,jj)
+               zlu_uv(ji,jj,1) = ( u0 (ji  ,jj+1,jkk) - u0 (ji  ,jj  ,jkk) ) * fmask(ji  ,jj  )   &
+                  &               - ( u0 (ji  ,jj  ,jkk) - u0 (ji  ,jj-1,jkk) ) * fmask(ji  ,jj-1)
+               zlv_vu(ji,jj,1) = ( v0 (ji+1,jj  ,jkk) - v0 (ji  ,jj  ,jkk) ) * fmask(ji  ,jj  )   &
+                  &               - ( v0 (ji  ,jj  ,jkk) - v0 (ji-1,jj  ,jkk) ) * fmask(ji-1,jj  )
 !
                zlu_uu(ji,jj,2) = ( zfu(ji+1,jj  ) - 2.*zfu(ji,jj) + zfu(ji-1,jj  ) ) * umask(ji,jj)
                zlv_vv(ji,jj,2) = ( zfv(ji  ,jj+1) - 2.*zfv(ji,jj) + zfv(ji  ,jj-1) ) * vmask(ji,jj)
@@ -419,26 +572,28 @@ CONTAINS
                   &               - ( zfv(ji  ,jj  ) - zfv(ji-1,jj  ) ) * fmask(ji-1,jj  )
             END DO
          END DO
-   !   END DO
 
 !                                      ! ====================== !
 !                                      !  Horizontal advection  !
-   !   DO jk = 1, jpkm1                       ! ====================== !
+                                       ! ====================== !
 !                                         ! horizontal volume fluxes
-         zfu(:,:) = 0.25 * e2u(:,:) * e3u(:,:) * un(:,:,jkk)
-         zfv(:,:) = 0.25 * e1v(:,:) * e3v(:,:) * vn(:,:,jkk)
+         zfu(:,:) = 0.25 * e2u(:,:) * e3u(:,:) * u1(:,:,jkk)
+         zfv(:,:) = 0.25 * e1v(:,:) * e3v(:,:) * v1(:,:,jkk)
+         zfu2(:,:) = 0.25 * e2u(:,:) * e3u(:,:) * u0(:,:,jkk)
+         zfv2(:,:) = 0.25 * e1v(:,:) * e3v(:,:) * v0(:,:,jkk)
 !
          DO jj = 1, jpjm1                          ! horizontal momentum fluxes at T- and F-point
             DO ji = 1, jpim1   ! vector opt.
-               zui = ( un(ji,jj,jkk) + un(ji+1,jj  ,jkk) )
-               zvj = ( vn(ji,jj,jkk) + vn(ji  ,jj+1,jkk) )
-!
+               zui = ( u0(ji,jj,jkk) + u0(ji+1,jj  ,jkk) )
+               zvj = ( v0(ji,jj,jkk) + v0(ji  ,jj+1,jkk) )
                IF (zui > 0) THEN   ;   zl_u = zlu_uu(ji  ,jj,1)
                ELSE                ;   zl_u = zlu_uu(ji+1,jj,1)
                ENDIF
                IF (zvj > 0) THEN   ;   zl_v = zlv_vv(ji,jj  ,1)
                ELSE                ;   zl_v = zlv_vv(ji,jj+1,1)
                ENDIF
+               zui = ( u2(ji,jj,jkk) + u2(ji+1,jj  ,jkk) )
+               zvj = ( v2(ji,jj,jkk) + v2(ji  ,jj+1,jkk) )
 !
                zfu_t(ji+1,jj  ) = ( zfu(ji,jj) + zfu(ji+1,jj  )                               &
                   &                    - gamma2 * ( zlu_uu(ji,jj,2) + zlu_uu(ji+1,jj  ,2) )  )   &
@@ -447,19 +602,21 @@ CONTAINS
                   &                    - gamma2 * ( zlv_vv(ji,jj,2) + zlv_vv(ji  ,jj+1,2) )  )   &
                   &                * ( zvj - gamma1 * zl_v)
 !
-               zfuj = ( zfu(ji,jj) + zfu(ji  ,jj+1) )
-               zfvi = ( zfv(ji,jj) + zfv(ji+1,jj  ) )
+               zfuj = ( zfu2(ji,jj) + zfu2(ji  ,jj+1) )
+               zfvi = ( zfv2(ji,jj) + zfv2(ji+1,jj  ) )
                IF (zfuj > 0) THEN   ;    zl_v = zlv_vu( ji  ,jj  ,1)
                ELSE                 ;    zl_v = zlv_vu( ji+1,jj,1)
                ENDIF
                IF (zfvi > 0) THEN   ;    zl_u = zlu_uv( ji,jj  ,1)
                ELSE                 ;    zl_u = zlu_uv( ji,jj+1,1)
                ENDIF
+               zfuj = ( zfu(ji,jj) + zfu(ji  ,jj+1) )
+               zfvi = ( zfv(ji,jj) + zfv(ji+1,jj  ) )
 !
                zfv_f(ji  ,jj  ) = ( zfvi - gamma2 * ( zlv_vu(ji,jj,2) + zlv_vu(ji+1,jj  ,2) )  )   &
-                  &                * ( un(ji,jj,jkk) + un(ji  ,jj+1,jkk) - gamma1 * zl_u )
+                  &                * ( u2(ji,jj,jkk) + u2(ji  ,jj+1,jkk) - gamma1 * zl_u )
                zfu_f(ji  ,jj  ) = ( zfuj - gamma2 * ( zlu_uv(ji,jj,2) + zlu_uv(ji  ,jj+1,2) )  )   &
-                  &                * ( vn(ji,jj,jkk) + vn(ji+1,jj  ,jkk) - gamma1 * zl_v )
+                  &                * ( v2(ji,jj,jkk) + v2(ji+1,jj  ,jkk) - gamma1 * zl_v )
             END DO
          END DO
          DO jj = 2, jpjm1                          ! divergence of horizontal momentum fluxes
@@ -476,24 +633,23 @@ CONTAINS
                adv_h_v(ji,jj) = adv_h_v(ji,jj) * vmask(ji,jj)
             END DO
          END DO
-   !   END DO
 
 !                                      ! ==================== !
 !                                      !  Vertical advection  !
-   !   DO jk = 1, jpkm1                       ! ==================== !
+                                       ! ==================== !
 !                                         ! Vertical volume fluxes
-         zfw(:,:,jkk) = 0.25 * e1t(:,:) * e2t(:,:) * wn(:,:,jkk)
-         zfw(:,:,jkkp1) = 0.25 * e1t(:,:) * e2t(:,:) * wn(:,:,jkkp1)
+         zfw(:,:,jkk) = 0.25 * e1t(:,:) * e2t(:,:) * w1(:,:,jkk)
+         zfw(:,:,jkkp1) = 0.25 * e1t(:,:) * e2t(:,:) * w1(:,:,jkkp1)
 !
    !      IF( jk == 1 ) THEN                        ! surface/bottom advective fluxes
    !       ... moved after interior fluxes ...
    !      ELSE                                      ! interior fluxes
             DO jj = 2, jpjm1
                DO ji = 2, jpim1   ! vector opt.
-                  zfu_uw(ji,jj,jkk) = ( zfw(ji,jj,jkk)+ zfw(ji+1,jj  ,jkk) ) * ( un(ji,jj,jkk) + un(ji,jj,jkkm1) )
-                  zfv_vw(ji,jj,jkk) = ( zfw(ji,jj,jkk)+ zfw(ji  ,jj+1,jkk) ) * ( vn(ji,jj,jkk) + vn(ji,jj,jkkm1) )
-                  zfu_uw(ji,jj,jkkp1) = ( zfw(ji,jj,jkkp1)+ zfw(ji+1,jj  ,jkkp1) ) * ( un(ji,jj,jkkp1) + un(ji,jj,jkk) )
-                  zfv_vw(ji,jj,jkkp1) = ( zfw(ji,jj,jkkp1)+ zfw(ji  ,jj+1,jkkp1) ) * ( vn(ji,jj,jkkp1) + vn(ji,jj,jkk) )
+                  zfu_uw(ji,jj,jkk) = ( zfw(ji,jj,jkk)+ zfw(ji+1,jj  ,jkk) ) * ( u2(ji,jj,jkk) + u2(ji,jj,jkkm1) )
+                  zfv_vw(ji,jj,jkk) = ( zfw(ji,jj,jkk)+ zfw(ji  ,jj+1,jkk) ) * ( v2(ji,jj,jkk) + v2(ji,jj,jkkm1) )
+                  zfu_uw(ji,jj,jkkp1) = ( zfw(ji,jj,jkkp1)+ zfw(ji+1,jj  ,jkkp1) ) * ( u2(ji,jj,jkkp1) + u2(ji,jj,jkk) )
+                  zfv_vw(ji,jj,jkkp1) = ( zfw(ji,jj,jkkp1)+ zfw(ji  ,jj+1,jkkp1) ) * ( v2(ji,jj,jkkp1) + v2(ji,jj,jkk) )
                END DO
             END DO
     !     ENDIF
@@ -510,8 +666,6 @@ CONTAINS
 !            ENDIF
          ENDIF
 
-   !   END DO
-   !   DO jk = 1, jpkm1                             ! divergence of vertical momentum flux divergence
          DO jj = 2, jpjm1
             DO ji = 2, jpim1   ! vector opt.
                adv_z_u(ji,jj) =  - ( zfu_uw(ji,jj,jkk) - zfu_uw(ji,jj,jkkp1) )    &
@@ -523,7 +677,6 @@ CONTAINS
                adv_z_v(ji,jj) = adv_z_v(ji,jj) * vmask(ji,jj)
             END DO
          END DO
-   !   END DO
 !
       DEALLOCATE( zfu_t , zfv_t  )
       DEALLOCATE( zfu_f , zfv_f  )
@@ -535,7 +688,7 @@ CONTAINS
    END SUBROUTINE dyn_adv_ubs
 
 
-   SUBROUTINE trd_ken( putrd, pvtrd, ktrd )
+   SUBROUTINE trd_ken( putrd, pvtrd, ktrd, u0, v0 )
 !!---------------------------------------------------------------------
 !!                  ***  ROUTINE trd_ken  ***
 !!
@@ -552,6 +705,7 @@ CONTAINS
 !!                                       of putrd, pvtrd
 !!----------------------------------------------------------------------
       REAL(wp), DIMENSION(:,:), INTENT(in   ) ::   putrd, pvtrd   ! U and V masked trends
+      REAL(wp), DIMENSION(:,:,:), INTENT(in   ) ::   u0, v0       ! U and V 
       REAL(wp), DIMENSION(:,:), INTENT(inout) ::   ktrd           ! KE trend
 !
       INTEGER ::   ji, jj, jk       ! dummy loop indices
@@ -566,26 +720,20 @@ CONTAINS
 !
 !      IF ( lk_vvl .AND. kt /= nkstp ) THEN   ! Variable volume: set box volume at the 1st call of kt time step
 !         nkstp = kt
-   !      DO jk = 1, jpkm1
-            bu   (:,:) =  e1u(:,:) * e2u(:,:) * e3u(:,:)
-            bv   (:,:) =  e1v(:,:) * e2v(:,:) * e3v(:,:)
-            r1_bt(:,:) = 1._wp / ( e12t(:,:) * e3t(:,:) ) * tmask(:,:)
-   !      END DO
-!      ENDIF
+      bu   (:,:) =  e1u(:,:) * e2u(:,:) * e3u(:,:)
+      bv   (:,:) =  e1v(:,:) * e2v(:,:) * e3v(:,:)
+      r1_bt(:,:) = 1._wp / ( e12t(:,:) * e3t(:,:) ) * tmask(:,:)
 !
-   !   ktrd(:,:,jpk) = 0._wp
-      ktrd(1,: ) = 0._wp
-      ktrd(:,1 ) = 0._wp
-   !   DO jk = 1, jpkm1
-         DO jj = 2, jpjglo
-            DO ji = 2, jpiglo
-               ktrd(ji,jj) = 0.5_wp * rau0 *( un(ji  ,jj,jkk) * putrd(ji  ,jj) * bu(ji  ,jj)  &
-                  &                            + un(ji-1,jj,jkk) * putrd(ji-1,jj) * bu(ji-1,jj)  &
-                  &                            + vn(ji,jj  ,jkk) * pvtrd(ji,jj  ) * bv(ji,jj  )  &
-                  &                            + vn(ji,jj-1,jkk) * pvtrd(ji,jj-1) * bv(ji,jj-1)  ) * r1_bt(ji,jj)
-            END DO
+      ktrd(:,:) = 0._wp
+      ktrd(:,:) = 0._wp
+      DO jj = 2, jpjglo
+         DO ji = 2, jpiglo
+            ktrd(ji,jj) = 0.5_wp * rau0 *( u0(ji  ,jj,jkk) * putrd(ji  ,jj) * bu(ji  ,jj)  &
+               &                            + u0(ji-1,jj,jkk) * putrd(ji-1,jj) * bu(ji-1,jj)  &
+               &                            + v0(ji,jj  ,jkk) * pvtrd(ji,jj  ) * bv(ji,jj  )  &
+               &                            + v0(ji,jj-1,jkk) * pvtrd(ji,jj-1) * bv(ji,jj-1)  ) * r1_bt(ji,jj)
          END DO
-   !   END DO
+      END DO
 
    END SUBROUTINE trd_ken
 
@@ -601,94 +749,160 @@ CONTAINS
     !!
     !!----------------------------------------------------------------------
     ! define new variables for output
-    ipk(:)                        = jpk
-    stypvar(1)%ichunk             = (/jpiglo,MAX(1,jpjglo/30),1,1 /)
-    stypvar(1)%cname              = 'advh_u'
-    stypvar(1)%cunits             = 'm/s^2'
-    stypvar(1)%rmissing_value     = 99999.
-    stypvar(1)%valid_min          = -1.
-    stypvar(1)%valid_max          = 1.
-    stypvar(1)%clong_name         = 'Horizontal divergence of u-momentum fluxes'
-    stypvar(1)%cshort_name        = 'advh_u'
-    stypvar(1)%conline_operation  = 'On u-grid'
-    stypvar(1)%caxis              = 'time depthu nav_lon_u nav_lat_u'
+    ipk1(:)                        = jpk
+    stypvar1(1)%ichunk             = (/jpiglo,MAX(1,jpjglo/30),1,1 /)
+    stypvar1(1)%cname              = 'advh_uu'
+    stypvar1(1)%cunits             = 'm/s^2'
+    stypvar1(1)%rmissing_value     = 99999.
+    stypvar1(1)%valid_min          = -1.
+    stypvar1(1)%valid_max          = 1.
+    stypvar1(1)%clong_name         = 'Horizontal advection of zonal momentum ('//TRIM(eddymean)//')'
+    stypvar1(1)%cshort_name        = 'advh_uu'
+    stypvar1(1)%conline_operation  = 'On u-grid'
+    stypvar1(1)%caxis              = 'time depthu nav_lon_u nav_lat_u'
     !
-    stypvar(2)%ichunk             = (/jpiglo,MAX(1,jpjglo/30),1,1 /)
-    stypvar(2)%cname              = 'advz_u'
-    stypvar(2)%cunits             = 'm/s^2'
-    stypvar(2)%rmissing_value     = 99999.
-    stypvar(2)%valid_min          = -1.
-    stypvar(2)%valid_max          = 1.
-    stypvar(2)%clong_name         = 'Divergence of vertical u-momentum fluxes'
-    stypvar(2)%cshort_name        = 'advz_u'
-    stypvar(2)%conline_operation  = 'On u-grid'
-    stypvar(2)%caxis              = 'time depthu nav_lon_u nav_lat_u'
+    stypvar1(2)%ichunk             = (/jpiglo,MAX(1,jpjglo/30),1,1 /)
+    stypvar1(2)%cname              = 'advz_uu'
+    stypvar1(2)%cunits             = 'm/s^2'
+    stypvar1(2)%rmissing_value     = 99999.
+    stypvar1(2)%valid_min          = -1.
+    stypvar1(2)%valid_max          = 1.
+    stypvar1(2)%clong_name         = 'Vertical advection of zonal momentum ('//TRIM(eddymean)//')'
+    stypvar1(2)%cshort_name        = 'advz_uu'
+    stypvar1(2)%conline_operation  = 'On u-grid'
+    stypvar1(2)%caxis              = 'time depthu nav_lon_u nav_lat_u'
 
-    stypvar2(1)%ichunk            = (/jpiglo,MAX(1,jpjglo/30),1,1 /)
-    stypvar2(1)%cname             = 'advh_v'
-    stypvar2(1)%cunits            = 'm/s^2'
-    stypvar2(1)%rmissing_value    = 99999.
-    stypvar2(1)%valid_min         = -1.
-    stypvar2(1)%valid_max         = 1.
-    stypvar2(1)%clong_name        = 'Horizontal divergence of v-momentum fluxes'
-    stypvar2(1)%cshort_name       = 'advh_v'
-    stypvar2(1)%conline_operation = 'On v-grid'
-    stypvar2(1)%caxis             = 'time depthv nav_lon_v nav_lat_v'
+    ipk1(:)                        = jpk
+    stypvar2(1)%ichunk             = (/jpiglo,MAX(1,jpjglo/30),1,1 /)
+    stypvar2(1)%cname              = 'advh_vv'
+    stypvar2(1)%cunits             = 'm/s^2'
+    stypvar2(1)%rmissing_value     = 99999.
+    stypvar2(1)%valid_min          = -1.
+    stypvar2(1)%valid_max          = 1.
+    stypvar2(1)%clong_name         = 'Horizontal advection of meridional momentum ('//TRIM(eddymean)//')'
+    stypvar2(1)%cshort_name        = 'advh_vv'
+    stypvar2(1)%conline_operation  = 'On v-grid'
+    stypvar2(1)%caxis              = 'time depthv nav_lon_v nav_lat_v'
     !
-    stypvar2(2)%ichunk            = (/jpiglo,MAX(1,jpjglo/30),1,1 /)
-    stypvar2(2)%cname             = 'advz_v'
-    stypvar2(2)%cunits            = 'm/s^2'
-    stypvar2(2)%rmissing_value    = 99999.
-    stypvar2(2)%valid_min         = -1.
-    stypvar2(2)%valid_max         = 1.
-    stypvar2(2)%clong_name        = 'Divergence of vertical v-momentum fluxes'
-    stypvar2(2)%cshort_name       = 'advz_v'
-    stypvar2(2)%conline_operation = 'On v-grid'
-    stypvar2(2)%caxis             = 'time depthv nav_lon_v nav_lat_v'
+    stypvar2(2)%ichunk             = (/jpiglo,MAX(1,jpjglo/30),1,1 /)
+    stypvar2(2)%cname              = 'advz_vv'
+    stypvar2(2)%cunits             = 'm/s^2'
+    stypvar2(2)%rmissing_value     = 99999.
+    stypvar2(2)%valid_min          = -1.
+    stypvar2(2)%valid_max          = 1.
+    stypvar2(2)%clong_name         = 'Vertical advection of meridional momentum ('//TRIM(eddymean)//')'
+    stypvar2(2)%cshort_name        = 'advz_vv'
+    stypvar2(2)%conline_operation  = 'On v-grid'
+    stypvar2(2)%caxis              = 'time depthv nav_lon_v nav_lat_v'
 
-    stypvar3(1)%ichunk            = (/jpiglo,MAX(1,jpjglo/30),1,1 /)
-    stypvar3(1)%cname             = 'advh_ke'
-    stypvar3(1)%cunits            = 'm^2/s^3'
-    stypvar3(1)%rmissing_value    = 99999.
-    stypvar3(1)%valid_min         = -1.
-    stypvar3(1)%valid_max         = 1.
-    stypvar3(1)%clong_name        = 'Horizontal divergence of KE fluxes'
-    stypvar3(1)%cshort_name       = 'advh_ke'
-    stypvar3(1)%conline_operation = 'On t-grid'
-    stypvar3(1)%caxis             = 'time deptht nav_lon_t nav_lat_t'
+    ipk2(:)                        = jpk
+    IF ( eddymean .EQ. 'full ') THEN
+    stypvar3(1)%ichunk             = (/jpiglo,MAX(1,jpjglo/30),1,1 /)
+    stypvar3(1)%cname              = 'advh_ke'
+    stypvar3(1)%cunits             = 'm^2/s^3'
+    stypvar3(1)%rmissing_value     = 99999.
+    stypvar3(1)%valid_min          = -1.
+    stypvar3(1)%valid_max          = 1.
+    stypvar3(1)%clong_name         = 'Horizontal advection of Kinetic Energy (full)'
+    stypvar3(1)%cshort_name        = 'advh_ke'
+    stypvar3(1)%conline_operation  = 'On t-grid'
+    stypvar3(1)%caxis              = 'time deptht nav_lon_t nav_lat_t'
     !
-    stypvar3(2)%ichunk            = (/jpiglo,MAX(1,jpjglo/30),1,1 /)
-    stypvar3(2)%cname             = 'advz_ke'
-    stypvar3(2)%cunits            = 'm^2/s^3'
-    stypvar3(2)%rmissing_value    = 99999.
-    stypvar3(2)%valid_min         = -1.
-    stypvar3(2)%valid_max         = 1.
-    stypvar3(2)%clong_name        = 'Divergence of vertical KE fluxes'
-    stypvar3(2)%cshort_name       = 'advz_ke'
-    stypvar3(2)%conline_operation = 'On t-grid'
-    stypvar3(2)%caxis             = 'time deptht nav_lon_t nav_lat_t'
-
-
-    
+    stypvar3(2)%ichunk             = (/jpiglo,MAX(1,jpjglo/30),1,1 /)
+    stypvar3(2)%cname              = 'advz_ke'
+    stypvar3(2)%cunits             = 'm^2/s^3'
+    stypvar3(2)%rmissing_value     = 99999.
+    stypvar3(2)%valid_min          = -1.
+    stypvar3(2)%valid_max          = 1.
+    stypvar3(2)%clong_name         = 'Vertical advection of Kinetic Energy (full)'
+    stypvar3(2)%cshort_name        = 'advz_ke'
+    stypvar3(2)%conline_operation  = 'On t-grid'
+    stypvar3(2)%caxis              = 'time deptht nav_lon_t nav_lat_t'
+    !
+    stypvar3(3)%ichunk             = (/jpiglo,MAX(1,jpjglo/30),1,1 /)
+    stypvar3(3)%cname              = 'NaN'
+    stypvar3(3)%cunits             = ''
+    stypvar3(3)%rmissing_value     = 99999.
+    stypvar3(3)%valid_min          = -1.
+    stypvar3(3)%valid_max          = 1.
+    stypvar3(3)%clong_name         = 'Nothing for '//TRIM(eddymean)//''
+    stypvar3(3)%cshort_name        = 'NaN'
+    stypvar3(3)%conline_operation  = ''
+    stypvar3(3)%caxis              = ''
+    !
+    stypvar3(4)%ichunk             = (/jpiglo,MAX(1,jpjglo/30),1,1 /)
+    stypvar3(4)%cname              = 'NaN'
+    stypvar3(4)%cunits             = ''
+    stypvar3(4)%rmissing_value     = 99999.
+    stypvar3(4)%valid_min          = -1.
+    stypvar3(4)%valid_max          = 1.
+    stypvar3(4)%clong_name         = 'Nothing for '//TRIM(eddymean)//''
+    stypvar3(4)%cshort_name        = 'NaN'
+    stypvar3(4)%conline_operation  = ''
+    stypvar3(4)%caxis              = ''
+    ELSE
+    stypvar3(1)%ichunk             = (/jpiglo,MAX(1,jpjglo/30),1,1 /)
+    stypvar3(1)%cname              = 'advh_ke_m'
+    stypvar3(1)%cunits             = 'm^2/s^3'
+    stypvar3(1)%rmissing_value     = 99999.
+    stypvar3(1)%valid_min          = -1.
+    stypvar3(1)%valid_max          = 1.
+    stypvar3(1)%clong_name         = 'um * advh_uu + vm * advh_vv ('//TRIM(eddymean)//')'
+    stypvar3(1)%cshort_name        = 'advh_ke_m'
+    stypvar3(1)%conline_operation  = 'On t-grid'
+    stypvar3(1)%caxis              = 'time deptht nav_lon_t nav_lat_t'
+    !
+    stypvar3(2)%ichunk             = (/jpiglo,MAX(1,jpjglo/30),1,1 /)
+    stypvar3(2)%cname              = 'advz_ke_m'
+    stypvar3(2)%cunits             = 'm^2/s^3'
+    stypvar3(2)%rmissing_value     = 99999.
+    stypvar3(2)%valid_min          = -1.
+    stypvar3(2)%valid_max          = 1.
+    stypvar3(2)%clong_name         = 'um * advz_uu + vm * advz_vv ('//TRIM(eddymean)//')'
+    stypvar3(2)%cshort_name        = 'advz_ke_m'
+    stypvar3(2)%conline_operation  = 'On t-grid'
+    stypvar3(2)%caxis              = 'time deptht nav_lon_t nav_lat_t'
+    !
+    stypvar3(3)%ichunk             = (/jpiglo,MAX(1,jpjglo/30),1,1 /)
+    stypvar3(3)%cname              = 'advh_ke_pr'
+    stypvar3(3)%cunits             = 'm^2/s^3'
+    stypvar3(3)%rmissing_value     = 99999.
+    stypvar3(3)%valid_min          = -1.
+    stypvar3(3)%valid_max          = 1.
+    stypvar3(3)%clong_name         = 'upr * advh_uu + vpr * advh_vv ('//TRIM(eddymean)//')'
+    stypvar3(3)%cshort_name        = 'advh_ke_pr'
+    stypvar3(3)%conline_operation  = 'On t-grid'
+    stypvar3(3)%caxis              = 'time deptht nav_lon_t nav_lat_t'
+    !
+    stypvar3(4)%ichunk             = (/jpiglo,MAX(1,jpjglo/30),1,1 /)
+    stypvar3(4)%cname              = 'advz_ke_pr'
+    stypvar3(4)%cunits             = 'm^2/s^3'
+    stypvar3(4)%rmissing_value     = 99999.
+    stypvar3(4)%valid_min          = -1.
+    stypvar3(4)%valid_max          = 1.
+    stypvar3(4)%clong_name         = 'upr * advz_uu + vpr * advz_vv ('//TRIM(eddymean)//')'
+    stypvar3(4)%cshort_name        = 'advz_ke_pr'
+    stypvar3(4)%conline_operation  = 'On t-grid'
+    stypvar3(4)%caxis              = 'time deptht nav_lon_t nav_lat_t'
+    END IF
 
     ! create output fileset
-    ncout_u = create      (cf_out_u, cf_ufil ,  jpiglo, jpjglo, jpk, cdep=cn_vdepthu  , ld_nc4=lnc4 )
-    ierr    = createvar   (ncout_u , stypvar ,  pnvarout, ipk , id_varout_u           , ld_nc4=lnc4 )
-    ierr    = putheadervar(ncout_u , cf_ufil ,  jpiglo, jpjglo, jpk, nav_lon_u, nav_lat_u, depthu   )
+    ncout_u = create      (cf_out_u, cf_uu ,  jpiglo, jpjglo, jpk, cdep=cn_vdepthu  , ld_nc4=lnc4 )
+    ierr    = createvar   (ncout_u , stypvar1,  pnvarout1, ipk1 , id_varout_u           , ld_nc4=lnc4 )
+    ierr    = putheadervar(ncout_u , cf_uu ,  jpiglo, jpjglo, jpk, nav_lon_u, nav_lat_u, depthu   )
 
-    ncout_v = create      (cf_out_v, cf_vfil ,  jpiglo, jpjglo, jpk, cdep=cn_vdepthv  , ld_nc4=lnc4 )
-    ierr    = createvar   (ncout_v , stypvar2,  pnvarout, ipk , id_varout_v           , ld_nc4=lnc4 )
-    ierr    = putheadervar(ncout_v , cf_vfil ,  jpiglo, jpjglo, jpk, nav_lon_v, nav_lat_v, depthv   )
+    ncout_v = create      (cf_out_v, cf_vv ,  jpiglo, jpjglo, jpk, cdep=cn_vdepthv  , ld_nc4=lnc4 )
+    ierr    = createvar   (ncout_v , stypvar2,  pnvarout1, ipk1 , id_varout_v           , ld_nc4=lnc4 )
+    ierr    = putheadervar(ncout_v , cf_vv ,  jpiglo, jpjglo, jpk, nav_lon_v, nav_lat_v, depthv   )
 
-    ncout_ke= create      (cf_out_ke, cf_tfil ,  jpiglo, jpjglo, jpk, cdep=cn_vdeptht  , ld_nc4=lnc4 )
-    ierr    = createvar   (ncout_ke , stypvar3,  pnvarout, ipk , id_varout_ke          , ld_nc4=lnc4 )
-    ierr    = putheadervar(ncout_ke , cf_tfil ,  jpiglo, jpjglo, jpk, nav_lon_t, nav_lat_t, deptht   )
+    ncout_ke= create     (cf_out_ke, cf_tt ,  jpiglo, jpjglo, jpk, cdep=cn_vdeptht  , ld_nc4=lnc4 )
+    ierr    = createvar   (ncout_ke , stypvar3,  pnvarout2, ipk2 , id_varout_ke          , ld_nc4=lnc4 )
+    ierr    = putheadervar(ncout_ke , cf_tt ,  jpiglo, jpjglo, jpk, nav_lon_t, nav_lat_t, deptht   )
 
-
-    dtim = getvar1d(cf_ufil , cn_vtimec,   jpt     )
-    ierr = putvar1d(ncout_u , dtim,        jpt, 'T')
-    ierr = putvar1d(ncout_v , dtim,        jpt, 'T')
-    ierr = putvar1d(ncout_ke, dtim,        jpt, 'T')
+    dtim = getvar1d(cf_uu , cn_vtimec,   jpt     )
+    ierr = putvar1d(ncout_u , dtim,      jpt, 'T')
+    ierr = putvar1d(ncout_v , dtim,      jpt, 'T')
+    ierr = putvar1d(ncout_ke, dtim,      jpt, 'T')
 
 
   END SUBROUTINE CreateOutput
