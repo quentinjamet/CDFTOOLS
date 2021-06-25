@@ -803,7 +803,7 @@ CONTAINS
     stypvar3(1)%rmissing_value     = 99999.
     stypvar3(1)%valid_min          = -1.
     stypvar3(1)%valid_max          = 1.
-    stypvar3(1)%clong_name         = 'Horizontal advection of Kinetic Energy (full)'
+    stypvar3(1)%clong_name         = 'Horizontal advection of Kinetic Energy ('//TRIM(eddymean)//')'
     stypvar3(1)%cshort_name        = 'advh_ke'
     stypvar3(1)%conline_operation  = 'On t-grid'
     stypvar3(1)%caxis              = 'time deptht nav_lon_t nav_lat_t'
@@ -814,32 +814,32 @@ CONTAINS
     stypvar3(2)%rmissing_value     = 99999.
     stypvar3(2)%valid_min          = -1.
     stypvar3(2)%valid_max          = 1.
-    stypvar3(2)%clong_name         = 'Vertical advection of Kinetic Energy (full)'
+    stypvar3(2)%clong_name         = 'Vertical advection of Kinetic Energy ('//TRIM(eddymean)//')'
     stypvar3(2)%cshort_name        = 'advz_ke'
     stypvar3(2)%conline_operation  = 'On t-grid'
     stypvar3(2)%caxis              = 'time deptht nav_lon_t nav_lat_t'
     !
     stypvar3(3)%ichunk             = (/jpiglo,MAX(1,jpjglo/30),1,1 /)
     stypvar3(3)%cname              = 'NaN'
-    stypvar3(3)%cunits             = ''
+    stypvar3(3)%cunits             = 'm^2/s^3'
     stypvar3(3)%rmissing_value     = 99999.
     stypvar3(3)%valid_min          = -1.
     stypvar3(3)%valid_max          = 1.
     stypvar3(3)%clong_name         = 'Nothing for '//TRIM(eddymean)//''
     stypvar3(3)%cshort_name        = 'NaN'
-    stypvar3(3)%conline_operation  = ''
-    stypvar3(3)%caxis              = ''
+    stypvar3(3)%conline_operation  = 'On t-grid'
+    stypvar3(3)%caxis              = 'time deptht nav_lon_t nav_lat_t'
     !
     stypvar3(4)%ichunk             = (/jpiglo,MAX(1,jpjglo/30),1,1 /)
     stypvar3(4)%cname              = 'NaN'
-    stypvar3(4)%cunits             = ''
+    stypvar3(4)%cunits             = 'm^2/s^3'
     stypvar3(4)%rmissing_value     = 99999.
     stypvar3(4)%valid_min          = -1.
     stypvar3(4)%valid_max          = 1.
     stypvar3(4)%clong_name         = 'Nothing for '//TRIM(eddymean)//''
     stypvar3(4)%cshort_name        = 'NaN'
-    stypvar3(4)%conline_operation  = ''
-    stypvar3(4)%caxis              = ''
+    stypvar3(4)%conline_operation  = 'On t-grid'
+    stypvar3(4)%caxis              = 'time deptht nav_lon_t nav_lat_t'
     ELSE
     stypvar3(1)%ichunk             = (/jpiglo,MAX(1,jpjglo/30),1,1 /)
     stypvar3(1)%cname              = 'advh_ke_m'
