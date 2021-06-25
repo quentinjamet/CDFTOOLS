@@ -37,10 +37,10 @@ PROGRAM cdf_dynadv_ubs_eddy_mean
   INTEGER(KIND=4)                              :: ncout_u, ncout_v         ! ncid of output file
   INTEGER(KIND=4)                              :: ncout_ke                 ! ncid of output file
   INTEGER(KIND=4), DIMENSION(pnvarout1)        :: ipk1                     ! level of output variables
-  INTEGER(KIND=4), DIMENSION(pnvarout2)        :: ipk2                     ! level of output variables
+  INTEGER(KIND=4), DIMENSION(:), ALLOCATABLE   :: ipk2                     ! level of output variables
   INTEGER(KIND=4), DIMENSION(pnvarout1)        :: id_varout_u              ! id of output variables (u-comp)
   INTEGER(KIND=4), DIMENSION(pnvarout1)        :: id_varout_v              ! id of output variables (v-comp)
-  INTEGER(KIND=4), DIMENSION(pnvarout2)        :: id_varout_ke             ! id of output variables (ke-comp)
+  INTEGER(KIND=4), DIMENSION(:), ALLOCATABLE   :: id_varout_ke             ! id of output variables (ke-comp)
 
   REAL(wp), PARAMETER                          :: gamma1 = 1._wp/3._wp     ! =1/4 quick      ; =1/3  3rd order UBS
   REAL(wp), PARAMETER                          :: gamma2 = 1._wp/32._wp    ! =0   2nd order  ; =1/32 4th order centred
@@ -235,9 +235,14 @@ PROGRAM cdf_dynadv_ubs_eddy_mean
   ALLOCATE( un(jpiglo, jpjglo, jpkk)      , vn(jpiglo, jpjglo, jpkk)       )
   ALLOCATE( wn(jpiglo, jpjglo, jpkk)                                       )
   IF ( eddymean .NE. 'full' ) THEN
+     ALLOCATE( ipk2(pnvarout2)                                             )
+     ALLOCATE( id_varout_ke(pnvarout2)                                     )
      ALLOCATE( sshnm(jpiglo, jpjglo)                                       )
      ALLOCATE( unm(jpiglo, jpjglo, jpkk)  , vnm(jpiglo, jpjglo, jpkk)      )
      ALLOCATE( wnm(jpiglo, jpjglo, jpkk)                                   )
+  ELSE
+     ALLOCATE( ipk2(pnvarout1)                                             )
+     ALLOCATE( id_varout_ke(pnvarout1)                                     )
   END IF 
   IF ( nodiss ) THEN
      ALLOCATE( tmpu(jpiglo, jpjglo, jpkk) , tmpv(jpiglo, jpjglo, jpkk)     )
@@ -818,28 +823,6 @@ CONTAINS
     stypvar3(2)%cshort_name        = 'advz_ke'
     stypvar3(2)%conline_operation  = 'On t-grid'
     stypvar3(2)%caxis              = 'time deptht nav_lon_t nav_lat_t'
-    !
-    stypvar3(3)%ichunk             = (/jpiglo,MAX(1,jpjglo/30),1,1 /)
-    stypvar3(3)%cname              = 'NaN'
-    stypvar3(3)%cunits             = 'm^2/s^3'
-    stypvar3(3)%rmissing_value     = 99999.
-    stypvar3(3)%valid_min          = -1.
-    stypvar3(3)%valid_max          = 1.
-    stypvar3(3)%clong_name         = 'Nothing for '//TRIM(eddymean)//''
-    stypvar3(3)%cshort_name        = 'NaN'
-    stypvar3(3)%conline_operation  = 'On t-grid'
-    stypvar3(3)%caxis              = 'time deptht nav_lon_t nav_lat_t'
-    !
-    stypvar3(4)%ichunk             = (/jpiglo,MAX(1,jpjglo/30),1,1 /)
-    stypvar3(4)%cname              = 'NaN'
-    stypvar3(4)%cunits             = 'm^2/s^3'
-    stypvar3(4)%rmissing_value     = 99999.
-    stypvar3(4)%valid_min          = -1.
-    stypvar3(4)%valid_max          = 1.
-    stypvar3(4)%clong_name         = 'Nothing for '//TRIM(eddymean)//''
-    stypvar3(4)%cshort_name        = 'NaN'
-    stypvar3(4)%conline_operation  = 'On t-grid'
-    stypvar3(4)%caxis              = 'time deptht nav_lon_t nav_lat_t'
     ELSE
     stypvar3(1)%ichunk             = (/jpiglo,MAX(1,jpjglo/30),1,1 /)
     stypvar3(1)%cname              = 'advh_ke_m'
