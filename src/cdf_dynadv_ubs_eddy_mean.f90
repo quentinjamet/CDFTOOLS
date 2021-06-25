@@ -2,11 +2,11 @@ PROGRAM cdf_dynadv_ubs_eddy_mean
   !!======================================================================
   !!                     ***  PROGRAM  cdf_dynadv_ubs_eddy_mean  ***
   !!=====================================================================
-  !!  ** Purpose : Compute eddy/mean momentum advection trends following UBS advection scheme.
+  !!  ** Purpose : Compute momentum and KE advection trends following UBS advection scheme,
+  !!               as well as the eddy/mean contributions (optional).
   !!
   !!  ** Method  : Adapt NEMO dynadv_ubs.F90 to CDFTOOLS (cf below for further details)
   !!               following the parameter used in the configuration eNATL60.
-  !!
   !!
   !! History : 4.0  : 09/2019  : Q. Jamet & J.M. Molines : Original code
   !!                : 05/2021  : Q. Jamet & J.M. Molines : Turn the computation layer per layer
@@ -52,22 +52,22 @@ PROGRAM cdf_dynadv_ubs_eddy_mean
   REAL(wp), DIMENSION(:,:)  , ALLOCATABLE      :: ht_0                     ! Reference ocean depth at T-points
   REAL(wp), DIMENSION(:,:)  , ALLOCATABLE      :: sshn                     ! now sea surface height
   REAL(wp), DIMENSION(:,:)  , ALLOCATABLE      :: sshnm                    ! now sea surface height - mean
-  REAL(wp), DIMENSION(:,:),   ALLOCATABLE      :: e1t, e2t                 ! horizontal metric, t-pts
-  REAL(wp), DIMENSION(:,:),   ALLOCATABLE      :: e1u, e2u                 ! horizontal metric, u-pts
-  REAL(wp), DIMENSION(:,:),   ALLOCATABLE      :: e1v, e2v                 ! horizontal metric, v-pts
-  REAL(wp), DIMENSION(:,:),   ALLOCATABLE      :: e12t, r1_e12u, r1_e12v   ! face area at t-pts and inverse at u- v- pts
-  REAL(wp), DIMENSION(:,:), ALLOCATABLE      :: e3t_0, e3u_0, e3v_0      ! vet. metrics at rest (without vvl)
-  REAL(wp), DIMENSION(:,:), ALLOCATABLE      :: e3u, e3v, e3t            ! vet. metrics, u- v- t- pts
-  REAL(wp), DIMENSION(:,:), ALLOCATABLE      :: tmask, fmask             ! mesh masks
-  REAL(wp), DIMENSION(:,:), ALLOCATABLE      :: umask, vmask             ! mesh masks
+  REAL(wp), DIMENSION(:,:)  , ALLOCATABLE      :: e1t, e2t                 ! horizontal metric, t-pts
+  REAL(wp), DIMENSION(:,:)  , ALLOCATABLE      :: e1u, e2u                 ! horizontal metric, u-pts
+  REAL(wp), DIMENSION(:,:)  , ALLOCATABLE      :: e1v, e2v                 ! horizontal metric, v-pts
+  REAL(wp), DIMENSION(:,:)  , ALLOCATABLE      :: e12t, r1_e12u, r1_e12v   ! face area at t-pts and inverse at u- v- pts
+  REAL(wp), DIMENSION(:,:)  , ALLOCATABLE      :: e3t_0, e3u_0, e3v_0      ! vet. metrics at rest (without vvl)
+  REAL(wp), DIMENSION(:,:)  , ALLOCATABLE      :: e3u, e3v, e3t            ! vet. metrics, u- v- t- pts
+  REAL(wp), DIMENSION(:,:)  , ALLOCATABLE      :: tmask, fmask             ! mesh masks
+  REAL(wp), DIMENSION(:,:)  , ALLOCATABLE      :: umask, vmask             ! mesh masks
   REAL(wp), DIMENSION(:,:,:), ALLOCATABLE      :: wn                       ! 3D vert. velocity (now)
   REAL(wp), DIMENSION(:,:,:), ALLOCATABLE      :: wnm                      ! 3D vert. velocity (now) - mean
-  REAL(wp), DIMENSION(:,:,:), ALLOCATABLE     :: un, vn               ! 3D hz. velocity (now)
-  REAL(wp), DIMENSION(:,:,:), ALLOCATABLE     :: tmpu, tmpv               ! tmeporary
-  REAL(wp), DIMENSION(:,:,:), ALLOCATABLE      :: unm, vnm               ! 3D hz. velocity (now) - mean
-  REAL(wp), DIMENSION(:,:), ALLOCATABLE      :: adv_h_u, adv_z_u         ! hor. and vert. advection of u-mom. (outputs)
-  REAL(wp), DIMENSION(:,:), ALLOCATABLE      :: adv_h_v, adv_z_v         ! hor. and vert. advection of v-mom. (outputs)
-  REAL(wp), DIMENSION(:,:), ALLOCATABLE      :: adv_h_ke, adv_z_ke       ! hor. and vert. advection of KE     (outputs)
+  REAL(wp), DIMENSION(:,:,:), ALLOCATABLE      :: un, vn                   ! 3D hz. velocity (now)
+  REAL(wp), DIMENSION(:,:,:), ALLOCATABLE      :: tmpu, tmpv               ! tmeporary
+  REAL(wp), DIMENSION(:,:,:), ALLOCATABLE      :: unm, vnm                 ! 3D hz. velocity (now) - mean
+  REAL(wp), DIMENSION(:,:)  , ALLOCATABLE      :: adv_h_u, adv_z_u         ! hor. and vert. advection of u-mom. (outputs)
+  REAL(wp), DIMENSION(:,:)  , ALLOCATABLE      :: adv_h_v, adv_z_v         ! hor. and vert. advection of v-mom. (outputs)
+  REAL(wp), DIMENSION(:,:)  , ALLOCATABLE      :: adv_h_ke, adv_z_ke       ! hor. and vert. advection of KE     (outputs)
 
   CHARACTER(LEN=256)                           :: cf_tt                    ! temperature netcdf file name (for mesh only)
   CHARACTER(LEN=256)                           :: cf_uu                    ! zonal vel  netcdf file name
@@ -77,7 +77,6 @@ PROGRAM cdf_dynadv_ubs_eddy_mean
   CHARACTER(LEN=256)                           :: cf_ww                    ! vert. vel  netcdf file name
   CHARACTER(LEN=256)                           :: cf_wm                    ! MEAN vert. vel  netcdf file name
   CHARACTER(LEN=256)                           :: cf_ssh                   ! Sea surface height
-  CHARACTER(LEN=256)                           :: cf_sshm                  ! MEAN sea surface height
   CHARACTER(LEN=255)                           :: cf_mh                    ! mesh       netcdf file name
   CHARACTER(LEN=255)                           :: cf_mz                    ! mesh       netcdf file name
   CHARACTER(LEN=255)                           :: cf_mask                  ! mask       netcdf file name
@@ -103,17 +102,20 @@ PROGRAM cdf_dynadv_ubs_eddy_mean
 
   narg= iargc()
   IF ( narg == 0 ) THEN
-     PRINT *,' usage : cdf_dynadv_ubs -t T-file -u U-file -um Um-file -v V-file -vm Vm-file ...'
-     PRINT *,'          -w W-file -wm Wm-file -ssh SSH-file -sshm SSHm-file...'
+     PRINT *,' usage : cdf_dynadv_ubs -t T-file -u U-file -v V-file -w W-file SSH-file ...'
+     PRINT *,'          -um Um-file -v V-file -vm Vm-file ...'
      PRINT *,'          -mh MESH-file -mz MESZ-file -mask MASK-file -bathy BATHY-file ...'
      PRINT *,'          -o_u OUT-file-u -o_v OUT-file-v -o_ke1 OUT-file-ke1 -o_ke2 OUT-file-ke2 ...'
      PRINT *,'          -em eddy-mean_option -nodiss'
      PRINT *,'      '
      PRINT *,'     PURPOSE :'
-     PRINT *,'      Compute the eddy/mean decomposition of momentum/KE advection trend following UBS advection scheme.'
+     PRINT *,'      Compute the momentum/KE advection trend following UBS advection scheme '
+     PRINT *,'      of Shchepetkin & McWilliams (2005).'
+     PRINT *,'      Options are provided for computing the eddy/mean decompositions (-em),'
+     PRINT *,'      and remove the diffusive term included in this advective scheme (-nodiss).'
      PRINT *,'      '
      PRINT *,'     ARGUMENTS :'
-     PRINT *,'       -t T-file          : netcdf file for temperature (for mesh only)'
+     PRINT *,'       -t T-file          : netcdf file for      temperature (for mesh only)'
      PRINT *,'       -u U-file          : netcdf file for      zonal velocity'
      PRINT *,'       -v V-file          : netcdf file for      meridional velocity'
      PRINT *,'       -w W-file          : netcdf file for      vertical velocity'
@@ -129,7 +131,6 @@ PROGRAM cdf_dynadv_ubs_eddy_mean
      PRINT *,'       -um Um-file        : netcdf file for MEAN zonal velocity'
      PRINT *,'       -vm Vm-file        : netcdf file for MEAN meridional velocity'
      PRINT *,'       -wm Wm-file        : netcdf file for MEAN vertical velocity'
-     PRINT *,'       -sshm SSHm-file    : netcdf file for MEAN SSH (for vvl recomputation of vert. grid)'
      PRINT *,'             ---  ' 
      PRINT *,'       -nodiss            : To remove dissipation term in the UBS advection scheme'
      PRINT *,'      '
@@ -137,8 +138,8 @@ PROGRAM cdf_dynadv_ubs_eddy_mean
      PRINT *,'       netcdf file : '
      PRINT *,'       -o_u OUT-file      : netcdf file for advection term for u-momentum'
      PRINT *,'       -o_v OUT-file      : netcdf file for advection term for v-momentum'
-     PRINT *,'       -o_ke1 OUT-file    : netcdf file for advection term for KE1'
-     PRINT *,'       -o_ke2 OUT-file    : netcdf file for advection term for KE2'
+     PRINT *,'       -o_ke1 OUT-file    : netcdf file for advection term for KE1 (ubar*putrd + vbar*pvtrd)'
+     PRINT *,'       -o_ke2 OUT-file    : netcdf file for advection term for KE2 (upr*putrd + vpr*pvtrd)'
      PRINT *,'      '
      PRINT *,'     SEE ALSO :'
      PRINT *,'      '
@@ -159,7 +160,6 @@ PROGRAM cdf_dynadv_ubs_eddy_mean
      CASE ('-um'       ) ; CALL getarg( ijarg, cf_um ) ; ijarg=ijarg+1
      CASE ('-vm'       ) ; CALL getarg( ijarg, cf_vm ) ; ijarg=ijarg+1
      CASE ('-wm'       ) ; CALL getarg( ijarg, cf_wm ) ; ijarg=ijarg+1
-     CASE ('-sshm'     ) ; CALL getarg( ijarg, cf_sshm); ijarg=ijarg+1
         !
      CASE ('-mh'       ) ; CALL getarg( ijarg, cf_mh   ) ; ijarg=ijarg+1
      CASE ('-mz'       ) ; CALL getarg( ijarg, cf_mz   ) ; ijarg=ijarg+1
@@ -193,9 +193,9 @@ PROGRAM cdf_dynadv_ubs_eddy_mean
   PRINT *, 'jpt    =', jpt
   !
   IF ( nodiss ) THEN
-          PRINT*, '-- I WILL NOT compute dissipation --'
+          PRINT*, '-- DO NOT compute dissipation --'
   ELSE
-          PRINT*, '-- I WILL compute dissipation --'
+          PRINT*, '-- Compute dissipation --'
   END IF
   !
   SELECT CASE (eddymean)
@@ -215,7 +215,7 @@ PROGRAM cdf_dynadv_ubs_eddy_mean
 
   !-- Allocate --
   ! mesh
-  ALLOCATE( deptht(jpk)                   , depthu(jpk)                   , depthv(jpk)                    )
+  ALLOCATE( deptht(jpk)                   , depthu(jpk)                    , depthv(jpk)                    )
   ALLOCATE( nav_lon_t(jpiglo, jpjglo)     , nav_lat_t(jpiglo, jpjglo)      )
   ALLOCATE( nav_lon_u(jpiglo, jpjglo)     , nav_lat_u(jpiglo, jpjglo)      )
   ALLOCATE( nav_lon_v(jpiglo, jpjglo)     , nav_lat_v(jpiglo, jpjglo)      )
@@ -225,27 +225,27 @@ PROGRAM cdf_dynadv_ubs_eddy_mean
   ALLOCATE( e1v(jpiglo, jpjglo)           , e2v(jpiglo, jpjglo)            )
   ALLOCATE( e12t(jpiglo, jpjglo)                                           )
   ALLOCATE( r1_e12u(jpiglo, jpjglo)       , r1_e12v(jpiglo, jpjglo)        )
-  ALLOCATE( e3t_0(jpiglo, jpjglo)    , e3t(jpiglo, jpjglo)          )
-  ALLOCATE( e3u_0( jpiglo, jpjglo)   , e3v_0(jpiglo, jpjglo)     )
-  ALLOCATE( e3u(jpiglo, jpjglo)      , e3v(jpiglo, jpjglo)       )
-  ALLOCATE( tmask(jpiglo, jpjglo)    , fmask(jpiglo, jpjglo)     )
-  ALLOCATE( umask(jpiglo, jpjglo)    , vmask(jpiglo, jpjglo)     )
+  ALLOCATE( e3t_0(jpiglo, jpjglo)         , e3t(jpiglo, jpjglo)            )
+  ALLOCATE( e3u_0( jpiglo, jpjglo)        , e3v_0(jpiglo, jpjglo)          )
+  ALLOCATE( e3u(jpiglo, jpjglo)           , e3v(jpiglo, jpjglo)            )
+  ALLOCATE( tmask(jpiglo, jpjglo)         , fmask(jpiglo, jpjglo)          )
+  ALLOCATE( umask(jpiglo, jpjglo)         , vmask(jpiglo, jpjglo)          )
   !! variables
   ALLOCATE( sshn(jpiglo, jpjglo)                                           )
-  ALLOCATE( un(jpiglo, jpjglo, jpkk)       , vn(jpiglo, jpjglo, jpkk)        )
-  ALLOCATE( wn(jpiglo, jpjglo, jpkk)                                        )
+  ALLOCATE( un(jpiglo, jpjglo, jpkk)      , vn(jpiglo, jpjglo, jpkk)       )
+  ALLOCATE( wn(jpiglo, jpjglo, jpkk)                                       )
   IF ( eddymean .NE. 'full' ) THEN
-     ALLOCATE( sshnm(jpiglo, jpjglo)                                           )
-     ALLOCATE( unm(jpiglo, jpjglo, jpkk)       , vnm(jpiglo, jpjglo, jpkk)        )
-     ALLOCATE( wnm(jpiglo, jpjglo, jpkk)                                        )
+     ALLOCATE( sshnm(jpiglo, jpjglo)                                       )
+     ALLOCATE( unm(jpiglo, jpjglo, jpkk)  , vnm(jpiglo, jpjglo, jpkk)      )
+     ALLOCATE( wnm(jpiglo, jpjglo, jpkk)                                   )
   END IF 
   IF ( nodiss ) THEN
-     ALLOCATE( tmpu(jpiglo, jpjglo, jpkk)     , tmpv(jpiglo, jpjglo, jpkk)    )
+     ALLOCATE( tmpu(jpiglo, jpjglo, jpkk) , tmpv(jpiglo, jpjglo, jpkk)     )
   END IF
   !
-  ALLOCATE( adv_h_u(jpiglo, jpjglo)  , adv_z_u(jpiglo, jpjglo)   )
-  ALLOCATE( adv_h_v(jpiglo, jpjglo)  , adv_z_v(jpiglo, jpjglo)   )
-  ALLOCATE( adv_h_ke(jpiglo, jpjglo) , adv_z_ke(jpiglo, jpjglo)  )
+  ALLOCATE( adv_h_u(jpiglo, jpjglo)       , adv_z_u(jpiglo, jpjglo)        )
+  ALLOCATE( adv_h_v(jpiglo, jpjglo)       , adv_z_v(jpiglo, jpjglo)        )
+  ALLOCATE( adv_h_ke(jpiglo, jpjglo)      , adv_z_ke(jpiglo, jpjglo)       )
 
 
   !!-- loading -- 
@@ -273,8 +273,8 @@ PROGRAM cdf_dynadv_ubs_eddy_mean
 
   !
   IF ( nodiss ) THEN
-     tmpu(:,:,:) = 0._wp       ! to remove the dissipation term in the UBS scheme
-     tmpv(:,:,:) = 0._wp       ! (care must be taken to not double counting it if considered)
+     tmpu(:,:,:) = 0._wp       ! remove the dissipation term in the UBS scheme
+     tmpv(:,:,:) = 0._wp       ! 
   END IF
 
   !-- Creat output netcdf files to fill in --
