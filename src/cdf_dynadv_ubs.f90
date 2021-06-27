@@ -1,6 +1,6 @@
-PROGRAM cdf_dynadv_ubs_eddy_mean 
+PROGRAM cdf_dynadv_ubs 
   !!======================================================================
-  !!                     ***  PROGRAM  cdf_dynadv_ubs_eddy_mean  ***
+  !!                     ***  PROGRAM  cdf_dynadv_ubs  ***
   !!=====================================================================
   !!  ** Purpose : Compute momentum and KE advection trends following UBS advection scheme,
   !!               as well as the eddy/mean contributions (optional).
@@ -25,7 +25,7 @@ PROGRAM cdf_dynadv_ubs_eddy_mean
 
   INTEGER(KIND=4), PARAMETER                   :: wp=4
   INTEGER(KIND=4), PARAMETER                   :: pnvarout1 = 2            ! number of output variables (uv)
-  INTEGER(KIND=4), PARAMETER                   :: pnvarout2 = 4            ! number of output variables (ke)
+  INTEGER(KIND=4)                              :: pnvarout2                ! number of output variables (ke)
   INTEGER(KIND=4)                              :: ji, jj, jk, jt           ! dummy loop indices
   INTEGER(KIND=4)                              :: it                       ! time index for vvl
   INTEGER(KIND=4)                              :: ierr                     ! working integer
@@ -90,7 +90,7 @@ PROGRAM cdf_dynadv_ubs_eddy_mean
 
   TYPE (variable), DIMENSION(pnvarout1)        :: stypvar1                 ! structure for attibutes (u-comp)
   TYPE (variable), DIMENSION(pnvarout1)        :: stypvar2                 ! structure for attibutes (v-comp)
-  TYPE (variable), DIMENSION(pnvarout2)        :: stypvar3                 ! structure for attibutes (ke-comp)
+  TYPE (variable), DIMENSION(:), ALLOCATABLE   :: stypvar3                 ! structure for attibutes (ke-comp)
 
   LOGICAL                                      :: l_w   =.FALSE.           ! flag for vertical location of bn2
   LOGICAL                                      :: lchk                     ! check missing files
@@ -176,6 +176,11 @@ PROGRAM cdf_dynadv_ubs_eddy_mean
      CASE DEFAULT     ; PRINT *,' ERROR : ', TRIM(cldum),' : unknown option.' ; STOP 99
      END SELECT
   END DO
+  IF ( eddymean .NE. 'full' ) THEN
+     pnvarout2=4
+  ELSE
+     pnvarout2=2
+  END IF
 
   !-- get dimensions (all files must have the same dimension that U-file) --
   jpiglo = getdim (cf_uu, cn_x)
@@ -214,6 +219,9 @@ PROGRAM cdf_dynadv_ubs_eddy_mean
   END SELECT
 
   !-- Allocate --
+  ALLOCATE( ipk2(pnvarout2)                                                )
+  ALLOCATE( id_varout_ke(pnvarout2)                                        )
+  ALLOCATE( stypvar3(pnvarout2)                                            )
   ! mesh
   ALLOCATE( deptht(jpk)                   , depthu(jpk)                    , depthv(jpk)                    )
   ALLOCATE( nav_lon_t(jpiglo, jpjglo)     , nav_lat_t(jpiglo, jpjglo)      )
@@ -235,14 +243,9 @@ PROGRAM cdf_dynadv_ubs_eddy_mean
   ALLOCATE( un(jpiglo, jpjglo, jpkk)      , vn(jpiglo, jpjglo, jpkk)       )
   ALLOCATE( wn(jpiglo, jpjglo, jpkk)                                       )
   IF ( eddymean .NE. 'full' ) THEN
-     ALLOCATE( ipk2(pnvarout2)                                             )
-     ALLOCATE( id_varout_ke(pnvarout2)                                     )
      ALLOCATE( sshnm(jpiglo, jpjglo)                                       )
      ALLOCATE( unm(jpiglo, jpjglo, jpkk)  , vnm(jpiglo, jpjglo, jpkk)      )
      ALLOCATE( wnm(jpiglo, jpjglo, jpkk)                                   )
-  ELSE
-     ALLOCATE( ipk2(pnvarout1)                                             )
-     ALLOCATE( id_varout_ke(pnvarout1)                                     )
   END IF 
   IF ( nodiss ) THEN
      ALLOCATE( tmpu(jpiglo, jpjglo, jpkk) , tmpv(jpiglo, jpjglo, jpkk)     )
