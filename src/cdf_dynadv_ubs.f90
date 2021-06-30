@@ -310,7 +310,17 @@ PROGRAM cdf_dynadv_ubs
    !! fmask = 2 on lateral boundaries for no-slip bdy conditions on vorticity !!
    fmask(:,:) = getvar(cf_mask, 'fmask' , jk, jpiglo, jpjglo )
 
-   DO jt = 1,jpt
+   DO jt = 1, jpt
+     sshn(:,:)   = 0._wp
+     un(:,:,:)   = 0._wp
+     vn(:,:,:)   = 0._wp
+     wn(:,:,:)   = 0._wp
+     IF ( eddymean .NE. 'full' ) THEN
+        unm(:,:,:)   = 0._wp
+        vnm(:,:,:)   = 0._wp
+        wnm(:,:,:)   = 0._wp
+     END IF
+     ! 
      sshn(:,:)     = getvar(cf_ssh  , cn_sossheig, 1, jpiglo, jpjglo, ktime=jt )
      e3t(:,:) = e3t_0(:,:) * (1 + sshn/ht_0)
      !- at u- and v- pts (domvvl.F90) -
@@ -330,9 +340,6 @@ PROGRAM cdf_dynadv_ubs
      !-- Load variables --
      IF ( jk == 1 ) THEN
         !- variable -
-        un(:,:,jkkm1) = 0._wp
-        vn(:,:,jkkm1) = 0._wp
-        wn(:,:,jkkm1) = 0._wp
         un(:,:,jkk  ) = getvar(cf_uu, cn_vozocrtx, jk  , jpiglo, jpjglo, ktime=jt )
         vn(:,:,jkk  ) = getvar(cf_vv, cn_vomecrty, jk  , jpiglo, jpjglo, ktime=jt )
         wn(:,:,jkk  ) = getvar(cf_ww, cn_vovecrtz, jk  , jpiglo, jpjglo, ktime=jt )
@@ -341,9 +348,6 @@ PROGRAM cdf_dynadv_ubs
         wn(:,:,jkkp1) = getvar(cf_ww, cn_vovecrtz, jk+1, jpiglo, jpjglo, ktime=jt )
         !- ensemble mean -
         IF ( eddymean .NE. 'full' ) THEN
-           unm(:,:,jkkm1) = 0._wp
-           vnm(:,:,jkkm1) = 0._wp
-           wnm(:,:,jkkm1) = 0._wp
            unm(:,:,jkk  ) = getvar(cf_um, cn_vozocrtx, jk  , jpiglo, jpjglo, ktime=jt )
            vnm(:,:,jkk  ) = getvar(cf_vm, cn_vomecrty, jk  , jpiglo, jpjglo, ktime=jt )
            wnm(:,:,jkk  ) = getvar(cf_wm, cn_vovecrtz, jk  , jpiglo, jpjglo, ktime=jt )
@@ -353,23 +357,23 @@ PROGRAM cdf_dynadv_ubs
         END IF
      ELSE
         !- variable -
-        un(:,:,jkkm1) = un(:,:,jkk  )
-        vn(:,:,jkkm1) = vn(:,:,jkk  )
-        wn(:,:,jkkm1) = wn(:,:,jkk  )
-        un(:,:,jkk  ) = un(:,:,jkkp1)
-        vn(:,:,jkk  ) = vn(:,:,jkkp1)
-        wn(:,:,jkk  ) = wn(:,:,jkkp1)
+        un(:,:,jkkm1) = getvar(cf_uu, cn_vozocrtx, jk-1, jpiglo, jpjglo, ktime=jt )
+        vn(:,:,jkkm1) = getvar(cf_vv, cn_vomecrty, jk-1, jpiglo, jpjglo, ktime=jt )
+        wn(:,:,jkkm1) = getvar(cf_ww, cn_vovecrtz, jk-1, jpiglo, jpjglo, ktime=jt )
+        un(:,:,jkk  ) = getvar(cf_uu, cn_vozocrtx, jk  , jpiglo, jpjglo, ktime=jt )
+        vn(:,:,jkk  ) = getvar(cf_vv, cn_vomecrty, jk  , jpiglo, jpjglo, ktime=jt )
+        wn(:,:,jkk  ) = getvar(cf_ww, cn_vovecrtz, jk  , jpiglo, jpjglo, ktime=jt )
         un(:,:,jkkp1) = getvar(cf_uu, cn_vozocrtx, jk+1, jpiglo, jpjglo, ktime=jt )
         vn(:,:,jkkp1) = getvar(cf_vv, cn_vomecrty, jk+1, jpiglo, jpjglo, ktime=jt )
         wn(:,:,jkkp1) = getvar(cf_ww, cn_vovecrtz, jk+1, jpiglo, jpjglo, ktime=jt )
         !- ensemble mean -
         IF ( eddymean .NE. 'full' ) THEN
-           unm(:,:,jkkm1) = unm(:,:,jkk  )
-           vnm(:,:,jkkm1) = vnm(:,:,jkk  )
-           wnm(:,:,jkkm1) = wnm(:,:,jkk  )
-           unm(:,:,jkk  ) = unm(:,:,jkkp1)
-           vnm(:,:,jkk  ) = vnm(:,:,jkkp1)
-           wnm(:,:,jkk  ) = wnm(:,:,jkkp1)
+           unm(:,:,jkkm1) = getvar(cf_um, cn_vozocrtx, jk-1, jpiglo, jpjglo, ktime=jt )
+           vnm(:,:,jkkm1) = getvar(cf_vm, cn_vomecrty, jk-1, jpiglo, jpjglo, ktime=jt )
+           wnm(:,:,jkkm1) = getvar(cf_wm, cn_vovecrtz, jk-1, jpiglo, jpjglo, ktime=jt )
+           unm(:,:,jkk  ) = getvar(cf_um, cn_vozocrtx, jk  , jpiglo, jpjglo, ktime=jt )
+           vnm(:,:,jkk  ) = getvar(cf_vm, cn_vomecrty, jk  , jpiglo, jpjglo, ktime=jt )
+           wnm(:,:,jkk  ) = getvar(cf_wm, cn_vovecrtz, jk  , jpiglo, jpjglo, ktime=jt )
            unm(:,:,jkkp1) = getvar(cf_um, cn_vozocrtx, jk+1, jpiglo, jpjglo, ktime=jt )
            vnm(:,:,jkkp1) = getvar(cf_vm, cn_vomecrty, jk+1, jpiglo, jpjglo, ktime=jt )
            wnm(:,:,jkkp1) = getvar(cf_wm, cn_vovecrtz, jk+1, jpiglo, jpjglo, ktime=jt )
