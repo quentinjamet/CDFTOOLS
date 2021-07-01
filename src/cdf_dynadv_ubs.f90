@@ -42,7 +42,7 @@ PROGRAM cdf_dynadv_ubs
   INTEGER(KIND=4), DIMENSION(pnvarout1)        :: id_varout_v              ! id of output variables (v-comp)
   INTEGER(KIND=4), DIMENSION(:), ALLOCATABLE   :: id_varout_ke             ! id of output variables (ke-comp)
 
-  REAL(wp), PARAMETER                          :: gamma1 = 1._wp/3._wp     ! =1/4 quick      ; =1/3  3rd order UBS
+  REAL(wp)                                     :: gamma1 = 1._wp/3._wp     ! =0 no dissipation ; =1/4 quick   ; =1/3  3rd order UBS
   REAL(wp), PARAMETER                          :: gamma2 = 1._wp/32._wp    ! =0   2nd order  ; =1/32 4th order centred
   REAL(wp), DIMENSION(:)    , ALLOCATABLE      :: dtim                     ! time
   REAL(wp), DIMENSION(:)    , ALLOCATABLE      :: deptht, depthu, depthv   ! z-grid (t, u,v)
@@ -63,7 +63,6 @@ PROGRAM cdf_dynadv_ubs
   REAL(wp), DIMENSION(:,:,:), ALLOCATABLE      :: wn                       ! 3D vert. velocity (now)
   REAL(wp), DIMENSION(:,:,:), ALLOCATABLE      :: wnm                      ! 3D vert. velocity (now) - mean
   REAL(wp), DIMENSION(:,:,:), ALLOCATABLE      :: un, vn                   ! 3D hz. velocity (now)
-  REAL(wp), DIMENSION(:,:,:), ALLOCATABLE      :: tmpu, tmpv               ! tmeporary
   REAL(wp), DIMENSION(:,:,:), ALLOCATABLE      :: unm, vnm                 ! 3D hz. velocity (now) - mean
   REAL(wp), DIMENSION(:,:)  , ALLOCATABLE      :: adv_h_u, adv_z_u         ! hor. and vert. advection of u-mom. (outputs)
   REAL(wp), DIMENSION(:,:)  , ALLOCATABLE      :: adv_h_v, adv_z_v         ! hor. and vert. advection of v-mom. (outputs)
@@ -113,6 +112,7 @@ PROGRAM cdf_dynadv_ubs
      PRINT *,'      of Shchepetkin & McWilliams (2005).'
      PRINT *,'      Options are provided for computing the eddy/mean decompositions (-em),'
      PRINT *,'      and remove the diffusive term included in this advective scheme (-nodiss).'
+     PRINT *,'      The latter is done by turnin gamma1 = 0.0.'
      PRINT *,'      '
      PRINT *,'     ARGUMENTS :'
      PRINT *,'       -t T-file          : netcdf file for      temperature (for mesh only)'
@@ -181,6 +181,10 @@ PROGRAM cdf_dynadv_ubs
   ELSE
      pnvarout2=2
   END IF
+  !
+  IF ( nodiss ) THEN
+     gamma1 = 0._wp
+  END IF
 
   !-- get dimensions (all files must have the same dimension that U-file) --
   jpiglo = getdim (cf_uu, cn_x)
@@ -199,8 +203,10 @@ PROGRAM cdf_dynadv_ubs
   !
   IF ( nodiss ) THEN
           PRINT*, '-- DO NOT compute dissipation --'
+          PRINT*, '           -->>  gamma1=  ', gamma1
   ELSE
           PRINT*, '-- Compute dissipation --'
+          PRINT*, '           -->>  gamma1=  ', gamma1
   END IF
   !
   SELECT CASE (eddymean)
@@ -247,9 +253,6 @@ PROGRAM cdf_dynadv_ubs
      ALLOCATE( unm(jpiglo, jpjglo, jpkk)  , vnm(jpiglo, jpjglo, jpkk)      )
      ALLOCATE( wnm(jpiglo, jpjglo, jpkk)                                   )
   END IF 
-  IF ( nodiss ) THEN
-     ALLOCATE( tmpu(jpiglo, jpjglo, jpkk) , tmpv(jpiglo, jpjglo, jpkk)     )
-  END IF
   !
   ALLOCATE( adv_h_u(jpiglo, jpjglo)       , adv_z_u(jpiglo, jpjglo)        )
   ALLOCATE( adv_h_v(jpiglo, jpjglo)       , adv_z_v(jpiglo, jpjglo)        )
@@ -279,11 +282,6 @@ PROGRAM cdf_dynadv_ubs
   r1_e12u(:,:) = 1._wp / (e1u(:,:) * e2u(:,:))
   r1_e12v(:,:) = 1._wp / (e1v(:,:) * e2v(:,:))
 
-  !
-  IF ( nodiss ) THEN
-     tmpu(:,:,:) = 0._wp       ! remove the dissipation term in the UBS scheme
-     tmpv(:,:,:) = 0._wp       ! 
-  END IF
 
   !-- Creat output netcdf files to fill in --
   PRINT *, '-- Creat output --'
@@ -342,6 +340,8 @@ PROGRAM cdf_dynadv_ubs
         !- variable -
         un(:,:,jkk  ) = getvar(cf_uu, cn_vozocrtx, jk  , jpiglo, jpjglo, ktime=jt )
         vn(:,:,jkk  ) = getvar(cf_vv, cn_vomecrty, jk  , jpiglo, jpjglo, ktime=jt )
+        un(:,:,jkk  ) = getvar(cf_uu, cn_vozocrtx, jk  , jpiglo, jpjglo, ktime=jt )
+        vn(:,:,jkk  ) = getvar(cf_vv, cn_vomecrty, jk  , jpiglo, jpjglo, ktime=jt )
         wn(:,:,jkk  ) = getvar(cf_ww, cn_vovecrtz, jk  , jpiglo, jpjglo, ktime=jt )
         un(:,:,jkkp1) = getvar(cf_uu, cn_vozocrtx, jk+1, jpiglo, jpjglo, ktime=jt )
         vn(:,:,jkkp1) = getvar(cf_vv, cn_vomecrty, jk+1, jpiglo, jpjglo, ktime=jt )
@@ -383,11 +383,7 @@ PROGRAM cdf_dynadv_ubs
      !-- Advection and KE trends --
      SELECT CASE (eddymean)
      CASE ('full' ) ;
-        IF ( nodiss ) THEN
-           CALL dyn_adv_ubs( jt, jk, tmpu, tmpv, un, vn, wn, un, vn )
-        ELSE
-           CALL dyn_adv_ubs( jt, jk, un, vn, un, vn, wn, un, vn )
-        END IF
+        CALL dyn_adv_ubs( jt, jk, un, vn, wn, un, vn )
         ierr = putvar(ncout_u , id_varout_u(1) , adv_h_u(:,:) , jk, jpiglo, jpjglo, ktime=jt )
         ierr = putvar(ncout_u , id_varout_u(2) , adv_z_u(:,:) , jk, jpiglo, jpjglo, ktime=jt )
         ierr = putvar(ncout_v , id_varout_v(1) , adv_h_v(:,:) , jk, jpiglo, jpjglo, ktime=jt )
@@ -398,11 +394,7 @@ PROGRAM cdf_dynadv_ubs
         ierr = putvar(ncout_ke, id_varout_ke(1), adv_h_ke(:,:), jk, jpiglo, jpjglo, ktime=jt )
         ierr = putvar(ncout_ke, id_varout_ke(2), adv_z_ke(:,:), jk, jpiglo, jpjglo, ktime=jt )
      CASE ('mean-mean') ;
-        IF ( nodiss ) THEN
-           CALL dyn_adv_ubs( jt, jk, tmpu, tmpv, unm, vnm, wnm, unm, vnm )
-        ELSE
-           CALL dyn_adv_ubs( jt, jk, unm, vnm, unm, vnm, wnm, unm, vnm )
-        END IF
+        CALL dyn_adv_ubs( jt, jk, unm, vnm, wnm, unm, vnm )
         ierr = putvar(ncout_u , id_varout_u(1) , adv_h_u(:,:) , jk, jpiglo, jpjglo, ktime=jt )
         ierr = putvar(ncout_u , id_varout_u(2) , adv_z_u(:,:) , jk, jpiglo, jpjglo, ktime=jt )
         ierr = putvar(ncout_v , id_varout_v(1) , adv_h_v(:,:) , jk, jpiglo, jpjglo, ktime=jt )
@@ -418,11 +410,7 @@ PROGRAM cdf_dynadv_ubs
         ierr = putvar(ncout_ke, id_varout_ke(3), adv_h_ke(:,:), jk, jpiglo, jpjglo, ktime=jt )
         ierr = putvar(ncout_ke, id_varout_ke(4), adv_z_ke(:,:), jk, jpiglo, jpjglo, ktime=jt )
      CASE ('mean-eddy') ;
-        IF ( nodiss ) THEN
-           CALL dyn_adv_ubs( jt, jk, tmpu, tmpv, unm, vnm, wnm, un(:,:,:)-unm(:,:,:), vn(:,:,:)-vnm(:,:,:) )
-        ELSE
-           CALL dyn_adv_ubs( jt, jk, unm, vnm, unm, vnm, wnm, un(:,:,:)-unm(:,:,:), vn(:,:,:)-vnm(:,:,:) )
-        END IF
+        CALL dyn_adv_ubs( jt, jk, unm, vnm, wnm, un(:,:,:)-unm(:,:,:), vn(:,:,:)-vnm(:,:,:) )
         ierr = putvar(ncout_u , id_varout_u(1) , adv_h_u(:,:) , jk, jpiglo, jpjglo, ktime=jt )
         ierr = putvar(ncout_u , id_varout_u(2) , adv_z_u(:,:) , jk, jpiglo, jpjglo, ktime=jt )
         ierr = putvar(ncout_v , id_varout_v(1) , adv_h_v(:,:) , jk, jpiglo, jpjglo, ktime=jt )
@@ -438,13 +426,8 @@ PROGRAM cdf_dynadv_ubs
         ierr = putvar(ncout_ke, id_varout_ke(3), adv_h_ke(:,:), jk, jpiglo, jpjglo, ktime=jt )
         ierr = putvar(ncout_ke, id_varout_ke(4), adv_z_ke(:,:), jk, jpiglo, jpjglo, ktime=jt )
      CASE ('eddy-mean') ;
-        IF ( nodiss ) THEN
-           CALL dyn_adv_ubs( jt, jk, tmpu, tmpv, un(:,:,:)-unm(:,:,:), vn(:,:,:)-vnm(:,:,:), &
+        CALL dyn_adv_ubs( jt, jk, un(:,:,:)-unm(:,:,:), vn(:,:,:)-vnm(:,:,:), &
                    & wn(:,:,:)-wnm(:,:,:), unm, vnm )
-        ELSE
-           CALL dyn_adv_ubs( jt, jk, un(:,:,:)-unm(:,:,:), vn(:,:,:)-vnm(:,:,:), un(:,:,:)-unm(:,:,:), &
-                   & vn(:,:,:)-vnm(:,:,:), wn(:,:,:)-wnm(:,:,:), unm, vnm )
-        END IF
         ierr = putvar(ncout_u , id_varout_u(1) , adv_h_u(:,:) , jk, jpiglo, jpjglo, ktime=jt )
         ierr = putvar(ncout_u , id_varout_u(2) , adv_z_u(:,:) , jk, jpiglo, jpjglo, ktime=jt )
         ierr = putvar(ncout_v , id_varout_v(1) , adv_h_v(:,:) , jk, jpiglo, jpjglo, ktime=jt )
@@ -460,13 +443,8 @@ PROGRAM cdf_dynadv_ubs
         ierr = putvar(ncout_ke, id_varout_ke(3), adv_h_ke(:,:), jk, jpiglo, jpjglo, ktime=jt )
         ierr = putvar(ncout_ke, id_varout_ke(4), adv_z_ke(:,:), jk, jpiglo, jpjglo, ktime=jt )
      CASE ('eddy-eddy') ;
-        IF ( nodiss ) THEN
-           CALL dyn_adv_ubs( jt, jk, tmpu, tmpv, un(:,:,:)-unm(:,:,:), vn(:,:,:)-vnm(:,:,:), wn(:,:,:)-wnm(:,:,:), &
+        CALL dyn_adv_ubs( jt, jk, un(:,:,:)-unm(:,:,:), vn(:,:,:)-vnm(:,:,:), wn(:,:,:)-wnm(:,:,:), &
                    & un(:,:,:)-unm(:,:,:), vn(:,:,:)-vnm(:,:,:) )
-        ELSE
-           CALL dyn_adv_ubs( jt, jk, un(:,:,:)-unm(:,:,:), vn(:,:,:)-vnm(:,:,:), un(:,:,:)-unm(:,:,:), &
-                   & vn(:,:,:)-vnm(:,:,:), wn(:,:,:)-wnm(:,:,:), un(:,:,:)-unm(:,:,:), vn(:,:,:)-vnm(:,:,:) )
-        END IF
         ierr = putvar(ncout_u , id_varout_u(1) , adv_h_u(:,:) , jk, jpiglo, jpjglo, ktime=jt )
         ierr = putvar(ncout_u , id_varout_u(2) , adv_z_u(:,:) , jk, jpiglo, jpjglo, ktime=jt )
         ierr = putvar(ncout_v , id_varout_v(1) , adv_h_v(:,:) , jk, jpiglo, jpjglo, ktime=jt )
@@ -492,7 +470,7 @@ PROGRAM cdf_dynadv_ubs
 
 CONTAINS
 
-   SUBROUTINE dyn_adv_ubs( kt, jk, u0, v0, u1, v1, w1, u2, v2 )
+   SUBROUTINE dyn_adv_ubs( kt, jk, u1, v1, w1, u2, v2 )
 !!----------------------------------------------------------------------
 !!                  ***  ROUTINE dyn_adv_ubs  ***
 !!
@@ -521,8 +499,6 @@ CONTAINS
 !!----------------------------------------------------------------------
       INTEGER, INTENT(in) ::   kt     ! ocean time-step index
       INTEGER, INTENT(in) ::   jk     ! ocean vertical level
-      REAL(wp), DIMENSION(:,:,:), INTENT(in   ) ::   u0, v0   ! U and V ocean velocities used to estimate the 
-                                                              ! upstream diffusive fluxes (should be full velocities)
       REAL(wp), DIMENSION(:,:,:), INTENT(in   ) ::   u1, v1, w1   ! U, V and W ocean advecting velocities
       REAL(wp), DIMENSION(:,:,:), INTENT(in   ) ::   u2, v2       ! U and V    ocean advected  velocities
 !
@@ -569,12 +545,12 @@ CONTAINS
          DO jj = 2, jpjm1                          ! laplacian
             DO ji = 2, jpim1   ! vector opt.
 !
-               zlu_uu(ji,jj,1) = ( u0 (ji+1,jj  ,jkk) - 2.*u0 (ji,jj,jkk) + u0 (ji-1,jj  ,jkk) ) * umask(ji,jj)
-               zlv_vv(ji,jj,1) = ( v0 (ji  ,jj+1,jkk) - 2.*v0 (ji,jj,jkk) + v0 (ji  ,jj-1,jkk) ) * vmask(ji,jj)
-               zlu_uv(ji,jj,1) = ( u0 (ji  ,jj+1,jkk) - u0 (ji  ,jj  ,jkk) ) * fmask(ji  ,jj  )   &
-                  &               - ( u0 (ji  ,jj  ,jkk) - u0 (ji  ,jj-1,jkk) ) * fmask(ji  ,jj-1)
-               zlv_vu(ji,jj,1) = ( v0 (ji+1,jj  ,jkk) - v0 (ji  ,jj  ,jkk) ) * fmask(ji  ,jj  )   &
-                  &               - ( v0 (ji  ,jj  ,jkk) - v0 (ji-1,jj  ,jkk) ) * fmask(ji-1,jj  )
+               zlu_uu(ji,jj,1) = ( u2 (ji+1,jj  ,jkk) - 2.*u2 (ji,jj,jkk) + u2 (ji-1,jj  ,jkk) ) * umask(ji,jj)
+               zlv_vv(ji,jj,1) = ( v2 (ji  ,jj+1,jkk) - 2.*v2 (ji,jj,jkk) + v2 (ji  ,jj-1,jkk) ) * vmask(ji,jj)
+               zlu_uv(ji,jj,1) = ( u2 (ji  ,jj+1,jkk) - u2 (ji  ,jj  ,jkk) ) * fmask(ji  ,jj  )   &
+                  &               - ( u2 (ji  ,jj  ,jkk) - u2 (ji  ,jj-1,jkk) ) * fmask(ji  ,jj-1)
+               zlv_vu(ji,jj,1) = ( v2 (ji+1,jj  ,jkk) - v2 (ji  ,jj  ,jkk) ) * fmask(ji  ,jj  )   &
+                  &               - ( v2 (ji  ,jj  ,jkk) - v2 (ji-1,jj  ,jkk) ) * fmask(ji-1,jj  )
 !
                zlu_uu(ji,jj,2) = ( zfu(ji+1,jj  ) - 2.*zfu(ji,jj) + zfu(ji-1,jj  ) ) * umask(ji,jj)
                zlv_vv(ji,jj,2) = ( zfv(ji  ,jj+1) - 2.*zfv(ji,jj) + zfv(ji  ,jj-1) ) * vmask(ji,jj)
@@ -591,21 +567,17 @@ CONTAINS
 !                                         ! horizontal volume fluxes
          zfu(:,:) = 0.25 * e2u(:,:) * e3u(:,:) * u1(:,:,jkk)
          zfv(:,:) = 0.25 * e1v(:,:) * e3v(:,:) * v1(:,:,jkk)
-         zfu2(:,:) = 0.25 * e2u(:,:) * e3u(:,:) * u0(:,:,jkk)
-         zfv2(:,:) = 0.25 * e1v(:,:) * e3v(:,:) * v0(:,:,jkk)
 !
          DO jj = 1, jpjm1                          ! horizontal momentum fluxes at T- and F-point
             DO ji = 1, jpim1   ! vector opt.
-               zui = ( u0(ji,jj,jkk) + u0(ji+1,jj  ,jkk) )
-               zvj = ( v0(ji,jj,jkk) + v0(ji  ,jj+1,jkk) )
+               zui = ( u2(ji,jj,jkk) + u2(ji+1,jj  ,jkk) )
+               zvj = ( v2(ji,jj,jkk) + v2(ji  ,jj+1,jkk) )
                IF (zui > 0) THEN   ;   zl_u = zlu_uu(ji  ,jj,1)
                ELSE                ;   zl_u = zlu_uu(ji+1,jj,1)
                ENDIF
                IF (zvj > 0) THEN   ;   zl_v = zlv_vv(ji,jj  ,1)
                ELSE                ;   zl_v = zlv_vv(ji,jj+1,1)
                ENDIF
-               zui = ( u2(ji,jj,jkk) + u2(ji+1,jj  ,jkk) )
-               zvj = ( v2(ji,jj,jkk) + v2(ji  ,jj+1,jkk) )
 !
                zfu_t(ji+1,jj  ) = ( zfu(ji,jj) + zfu(ji+1,jj  )                               &
                   &                    - gamma2 * ( zlu_uu(ji,jj,2) + zlu_uu(ji+1,jj  ,2) )  )   &
@@ -614,16 +586,14 @@ CONTAINS
                   &                    - gamma2 * ( zlv_vv(ji,jj,2) + zlv_vv(ji  ,jj+1,2) )  )   &
                   &                * ( zvj - gamma1 * zl_v)
 !
-               zfuj = ( zfu2(ji,jj) + zfu2(ji  ,jj+1) )
-               zfvi = ( zfv2(ji,jj) + zfv2(ji+1,jj  ) )
+               zfuj = ( zfu(ji,jj) + zfu(ji  ,jj+1) )
+               zfvi = ( zfv(ji,jj) + zfv(ji+1,jj  ) )
                IF (zfuj > 0) THEN   ;    zl_v = zlv_vu( ji  ,jj  ,1)
                ELSE                 ;    zl_v = zlv_vu( ji+1,jj,1)
                ENDIF
                IF (zfvi > 0) THEN   ;    zl_u = zlu_uv( ji,jj  ,1)
                ELSE                 ;    zl_u = zlu_uv( ji,jj+1,1)
                ENDIF
-               zfuj = ( zfu(ji,jj) + zfu(ji  ,jj+1) )
-               zfvi = ( zfv(ji,jj) + zfv(ji+1,jj  ) )
 !
                zfv_f(ji  ,jj  ) = ( zfvi - gamma2 * ( zlv_vu(ji,jj,2) + zlv_vu(ji+1,jj  ,2) )  )   &
                   &                * ( u2(ji,jj,jkk) + u2(ji  ,jj+1,jkk) - gamma1 * zl_u )
