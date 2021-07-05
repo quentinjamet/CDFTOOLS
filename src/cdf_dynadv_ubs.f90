@@ -19,36 +19,36 @@ PROGRAM cdf_dynadv_ubs
   !! $Id$
   !! Copyright (c) 2017, J.-M. Molines 
   !! Software governed by the CeCILL licence (Licence/CDFTOOLSCeCILL.txt)
-  !! @class Equation_of_state
+  !! @class derived_fields
   !!----------------------------------------------------------------------
   IMPLICIT NONE
 
   INTEGER(KIND=4), PARAMETER                   :: wp=4
-  INTEGER(KIND=4), PARAMETER                   :: pnvarout1 = 2            ! number of output variables (uv)
-  INTEGER(KIND=4)                              :: pnvarout2                ! number of output variables (ke)
+  INTEGER(KIND=4), PARAMETER                   :: jpnvarout1 = 2            ! number of output variables (uv)
+  INTEGER(KIND=4)                              :: jpnvarout2                ! number of output variables (ke)
   INTEGER(KIND=4)                              :: ji, jj, jk, jt           ! dummy loop indices
   INTEGER(KIND=4)                              :: it                       ! time index for vvl
   INTEGER(KIND=4)                              :: ierr                     ! working integer
   INTEGER(KIND=4)                              :: narg, iargc, ijarg       ! 
-  INTEGER(KIND=4)                              :: jpiglo, jpjglo, jpk, jpt ! size of the domain
-  INTEGER(KIND=4)                              :: jpim1, jpjm1, jpkm1      ! index for computation of grad/div
-  INTEGER(KIND=4)                              :: jkkm1=1, jkk=2, jkkp1=3  ! for swapping the levels
-  INTEGER(KIND=4)                              :: jpkk=3                   ! number of level to load (jkkm1, jkk, jkkp1)
+  INTEGER(KIND=4)                              :: npiglo, npjglo, npk, npt ! size of the domain
+  INTEGER(KIND=4)                              :: npim1, npjm1, npkm1      ! index for computation of grad/div
+  INTEGER(KIND=4)                              :: nkkm1=1, nkk=2, nkkp1=3  ! for swapping the levels
+  INTEGER(KIND=4)                              :: npkk=3                   ! number of level to load (nkkm1, nkk, nkkp1)
   INTEGER(KIND=4)                              :: ncout_u, ncout_v         ! ncid of output file
   INTEGER(KIND=4)                              :: ncout_ke                 ! ncid of output file
-  INTEGER(KIND=4), DIMENSION(pnvarout1)        :: ipk1                     ! level of output variables
+  INTEGER(KIND=4), DIMENSION(jpnvarout1)        :: ipk1                     ! level of output variables
   INTEGER(KIND=4), DIMENSION(:), ALLOCATABLE   :: ipk2                     ! level of output variables
-  INTEGER(KIND=4), DIMENSION(pnvarout1)        :: id_varout_u              ! id of output variables (u-comp)
-  INTEGER(KIND=4), DIMENSION(pnvarout1)        :: id_varout_v              ! id of output variables (v-comp)
+  INTEGER(KIND=4), DIMENSION(jpnvarout1)        :: id_varout_u              ! id of output variables (u-comp)
+  INTEGER(KIND=4), DIMENSION(jpnvarout1)        :: id_varout_v              ! id of output variables (v-comp)
   INTEGER(KIND=4), DIMENSION(:), ALLOCATABLE   :: id_varout_ke             ! id of output variables (ke-comp)
 
-  REAL(wp)                                     :: gamma1 = 1._wp/3._wp     ! =0 no dissipation ; =1/4 quick   ; =1/3  3rd order UBS
-  REAL(wp), PARAMETER                          :: gamma2 = 1._wp/32._wp    ! =0   2nd order  ; =1/32 4th order centred
+  REAL(wp)                                     :: pp_gamma1 = 1._wp/3._wp     ! =0 no dissipation ; =1/4 quick   ; =1/3  3rd order UBS
+  REAL(wp), PARAMETER                          :: pp_gamma2 = 1._wp/32._wp    ! =0   2nd order  ; =1/32 4th order centred
   REAL(wp), DIMENSION(:)    , ALLOCATABLE      :: dtim                     ! time
   REAL(wp), DIMENSION(:)    , ALLOCATABLE      :: deptht, depthu, depthv   ! z-grid (t, u,v)
-  REAL(wp), DIMENSION(:,:)  , ALLOCATABLE      :: nav_lon_t, nav_lat_t     ! t-grid hor.
-  REAL(wp), DIMENSION(:,:)  , ALLOCATABLE      :: nav_lon_u, nav_lat_u     ! u-grid hor.
-  REAL(wp), DIMENSION(:,:)  , ALLOCATABLE      :: nav_lon_v, nav_lat_v     ! v-grid hor.
+  REAL(wp), DIMENSION(:,:)  , ALLOCATABLE      :: rlon_t, rlat_t     ! t-grid hor.
+  REAL(wp), DIMENSION(:,:)  , ALLOCATABLE      :: rlon_u, rlat_u     ! u-grid hor.
+  REAL(wp), DIMENSION(:,:)  , ALLOCATABLE      :: rlon_v, rlat_v     ! v-grid hor.
   REAL(wp), DIMENSION(:,:)  , ALLOCATABLE      :: ht_0                     ! Reference ocean depth at T-points
   REAL(wp), DIMENSION(:,:)  , ALLOCATABLE      :: sshn                     ! now sea surface height
   REAL(wp), DIMENSION(:,:)  , ALLOCATABLE      :: sshnm                    ! now sea surface height - mean
@@ -87,8 +87,8 @@ PROGRAM cdf_dynadv_ubs
   CHARACTER(LEN=256)                           :: cglobal                  ! global attribute
   CHARACTER(LEN=256)                           :: eddymean='full'          ! select what to compute
 
-  TYPE (variable), DIMENSION(pnvarout1)        :: stypvar1                 ! structure for attibutes (u-comp)
-  TYPE (variable), DIMENSION(pnvarout1)        :: stypvar2                 ! structure for attibutes (v-comp)
+  TYPE (variable), DIMENSION(jpnvarout1)        :: stypvar1                 ! structure for attibutes (u-comp)
+  TYPE (variable), DIMENSION(jpnvarout1)        :: stypvar2                 ! structure for attibutes (v-comp)
   TYPE (variable), DIMENSION(:), ALLOCATABLE   :: stypvar3                 ! structure for attibutes (ke-comp)
 
   LOGICAL                                      :: l_w   =.FALSE.           ! flag for vertical location of bn2
@@ -112,7 +112,7 @@ PROGRAM cdf_dynadv_ubs
      PRINT *,'      of Shchepetkin & McWilliams (2005).'
      PRINT *,'      Options are provided for computing the eddy/mean decompositions (-em),'
      PRINT *,'      and remove the diffusive term included in this advective scheme (-nodiss).'
-     PRINT *,'      The latter is done by turnin gamma1 = 0.0.'
+     PRINT *,'      The latter is done by turnin pp_gamma1 = 0.0.'
      PRINT *,'      '
      PRINT *,'     ARGUMENTS :'
      PRINT *,'       -t T-file          : netcdf file for      temperature (for mesh only)'
@@ -177,36 +177,36 @@ PROGRAM cdf_dynadv_ubs
      END SELECT
   END DO
   IF ( eddymean .NE. 'full' ) THEN
-     pnvarout2=4
+     jpnvarout2=4
   ELSE
-     pnvarout2=2
+     jpnvarout2=2
   END IF
   !
   IF ( nodiss ) THEN
-     gamma1 = 0._wp
+     pp_gamma1 = 0._wp
   END IF
 
   !-- get dimensions (all files must have the same dimension that U-file) --
-  jpiglo = getdim (cf_uu, cn_x)
-  jpjglo = getdim (cf_uu, cn_y)
-  jpk    = getdim (cf_uu, cn_z)
-  jpt    = getdim (cf_uu, cn_t)
-  jpim1 = jpiglo-1
-  jpjm1 = jpjglo-1
-  jpkm1 = jpk-1
+  npiglo = getdim (cf_uu, cn_x)
+  npjglo = getdim (cf_uu, cn_y)
+  npk    = getdim (cf_uu, cn_z)
+  npt    = getdim (cf_uu, cn_t)
+  npim1 = npiglo-1
+  npjm1 = npjglo-1
+  npkm1 = npk-1
   
   !-- summary --
-  PRINT *, 'jpiglo =', jpiglo
-  PRINT *, 'jpjglo =', jpjglo
-  PRINT *, 'jpk    =', jpk
-  PRINT *, 'jpt    =', jpt
+  PRINT *, 'npiglo =', npiglo
+  PRINT *, 'npjglo =', npjglo
+  PRINT *, 'npk    =', npk
+  PRINT *, 'npt    =', npt
   !
   IF ( nodiss ) THEN
           PRINT*, '-- DO NOT compute dissipation --'
-          PRINT*, '           -->>  gamma1=  ', gamma1
+          PRINT*, '           -->>  pp_gamma1=  ', pp_gamma1
   ELSE
           PRINT*, '-- Compute dissipation --'
-          PRINT*, '           -->>  gamma1=  ', gamma1
+          PRINT*, '           -->>  pp_gamma1=  ', pp_gamma1
   END IF
   !
   SELECT CASE (eddymean)
@@ -225,59 +225,59 @@ PROGRAM cdf_dynadv_ubs
   END SELECT
 
   !-- Allocate --
-  ALLOCATE( ipk2(pnvarout2)                                                )
-  ALLOCATE( id_varout_ke(pnvarout2)                                        )
-  ALLOCATE( stypvar3(pnvarout2)                                            )
+  ALLOCATE( ipk2(jpnvarout2)                                                )
+  ALLOCATE( id_varout_ke(jpnvarout2)                                        )
+  ALLOCATE( stypvar3(jpnvarout2)                                            )
   ! mesh
-  ALLOCATE( deptht(jpk)                   , depthu(jpk)                    , depthv(jpk)                    )
-  ALLOCATE( nav_lon_t(jpiglo, jpjglo)     , nav_lat_t(jpiglo, jpjglo)      )
-  ALLOCATE( nav_lon_u(jpiglo, jpjglo)     , nav_lat_u(jpiglo, jpjglo)      )
-  ALLOCATE( nav_lon_v(jpiglo, jpjglo)     , nav_lat_v(jpiglo, jpjglo)      )
-  ALLOCATE( ht_0(jpiglo, jpjglo)                                           )
-  ALLOCATE( e1t(jpiglo, jpjglo)           , e2t(jpiglo, jpjglo)            )
-  ALLOCATE( e1u(jpiglo, jpjglo)           , e2u(jpiglo, jpjglo)            )
-  ALLOCATE( e1v(jpiglo, jpjglo)           , e2v(jpiglo, jpjglo)            )
-  ALLOCATE( e12t(jpiglo, jpjglo)                                           )
-  ALLOCATE( r1_e12u(jpiglo, jpjglo)       , r1_e12v(jpiglo, jpjglo)        )
-  ALLOCATE( e3t_0(jpiglo, jpjglo)         , e3t(jpiglo, jpjglo)            )
-  ALLOCATE( e3u_0( jpiglo, jpjglo)        , e3v_0(jpiglo, jpjglo)          )
-  ALLOCATE( e3u(jpiglo, jpjglo)           , e3v(jpiglo, jpjglo)            )
-  ALLOCATE( tmask(jpiglo, jpjglo)         , fmask(jpiglo, jpjglo)          )
-  ALLOCATE( umask(jpiglo, jpjglo)         , vmask(jpiglo, jpjglo)          )
+  ALLOCATE( deptht(npk)                   , depthu(npk)                    , depthv(npk)                    )
+  ALLOCATE( rlon_t(npiglo, npjglo)     , rlat_t(npiglo, npjglo)      )
+  ALLOCATE( rlon_u(npiglo, npjglo)     , rlat_u(npiglo, npjglo)      )
+  ALLOCATE( rlon_v(npiglo, npjglo)     , rlat_v(npiglo, npjglo)      )
+  ALLOCATE( ht_0(npiglo, npjglo)                                           )
+  ALLOCATE( e1t(npiglo, npjglo)           , e2t(npiglo, npjglo)            )
+  ALLOCATE( e1u(npiglo, npjglo)           , e2u(npiglo, npjglo)            )
+  ALLOCATE( e1v(npiglo, npjglo)           , e2v(npiglo, npjglo)            )
+  ALLOCATE( e12t(npiglo, npjglo)                                           )
+  ALLOCATE( r1_e12u(npiglo, npjglo)       , r1_e12v(npiglo, npjglo)        )
+  ALLOCATE( e3t_0(npiglo, npjglo)         , e3t(npiglo, npjglo)            )
+  ALLOCATE( e3u_0( npiglo, npjglo)        , e3v_0(npiglo, npjglo)          )
+  ALLOCATE( e3u(npiglo, npjglo)           , e3v(npiglo, npjglo)            )
+  ALLOCATE( tmask(npiglo, npjglo)         , fmask(npiglo, npjglo)          )
+  ALLOCATE( umask(npiglo, npjglo)         , vmask(npiglo, npjglo)          )
   !! variables
-  ALLOCATE( sshn(jpiglo, jpjglo)                                           )
-  ALLOCATE( un(jpiglo, jpjglo, jpkk)      , vn(jpiglo, jpjglo, jpkk)       )
-  ALLOCATE( wn(jpiglo, jpjglo, jpkk)                                       )
+  ALLOCATE( sshn(npiglo, npjglo)                                           )
+  ALLOCATE( un(npiglo, npjglo, npkk)      , vn(npiglo, npjglo, npkk)       )
+  ALLOCATE( wn(npiglo, npjglo, npkk)                                       )
   IF ( eddymean .NE. 'full' ) THEN
-     ALLOCATE( sshnm(jpiglo, jpjglo)                                       )
-     ALLOCATE( unm(jpiglo, jpjglo, jpkk)  , vnm(jpiglo, jpjglo, jpkk)      )
-     ALLOCATE( wnm(jpiglo, jpjglo, jpkk)                                   )
+     ALLOCATE( sshnm(npiglo, npjglo)                                       )
+     ALLOCATE( unm(npiglo, npjglo, npkk)  , vnm(npiglo, npjglo, npkk)      )
+     ALLOCATE( wnm(npiglo, npjglo, npkk)                                   )
   END IF 
   !
-  ALLOCATE( adv_h_u(jpiglo, jpjglo)       , adv_z_u(jpiglo, jpjglo)        )
-  ALLOCATE( adv_h_v(jpiglo, jpjglo)       , adv_z_v(jpiglo, jpjglo)        )
-  ALLOCATE( adv_h_ke(jpiglo, jpjglo)      , adv_z_ke(jpiglo, jpjglo)       )
+  ALLOCATE( adv_h_u(npiglo, npjglo)       , adv_z_u(npiglo, npjglo)        )
+  ALLOCATE( adv_h_v(npiglo, npjglo)       , adv_z_v(npiglo, npjglo)        )
+  ALLOCATE( adv_h_ke(npiglo, npjglo)      , adv_z_ke(npiglo, npjglo)       )
 
 
   !!-- loading -- 
   PRINT *, '-- LOAD VARIABLES --'
-  nav_lon_t    = getvar(cf_tt, 'nav_lon', 1, jpiglo, jpjglo)
-  nav_lat_t    = getvar(cf_tt, 'nav_lat', 1, jpiglo, jpjglo)
-  deptht       = getvar1d(cf_tt, cn_vdeptht , jpk)
-  nav_lon_u    = getvar(cf_uu, 'nav_lon', 1, jpiglo, jpjglo)
-  nav_lat_u    = getvar(cf_uu, 'nav_lat', 1, jpiglo, jpjglo)
-  depthu       = getvar1d(cf_uu, cn_vdepthu , jpk)
-  nav_lon_v    = getvar(cf_vv, 'nav_lon', 1, jpiglo, jpjglo)
-  nav_lat_v    = getvar(cf_vv, 'nav_lat', 1, jpiglo, jpjglo)
-  depthv       = getvar1d(cf_vv, cn_vdepthv , jpk)
-  ht_0(:,:)    = getvar(cf_bathy, 'gdepw_0', 1, jpiglo, jpjglo )
+  rlon_t    = getvar(cf_tt   , cn_vlon2d, 1, npiglo, npjglo)
+  rlat_t    = getvar(cf_tt   , cn_vlat2d, 1, npiglo, npjglo)
+  deptht    = getvar1d(cf_tt , cn_vdeptht  , npk)
+  rlon_u    = getvar(cf_uu   , cn_vlon2d, 1, npiglo, npjglo)
+  rlat_u    = getvar(cf_uu   , cn_vlat2d, 1, npiglo, npjglo)
+  depthu    = getvar1d(cf_uu , cn_vdepthu  , npk)
+  rlon_v    = getvar(cf_vv   , cn_vlon2d, 1, npiglo, npjglo)
+  rlat_v    = getvar(cf_vv   , cn_vlat2d, 1, npiglo, npjglo)
+  depthv    = getvar1d(cf_vv , cn_vdepthv  , npk)
+  ht_0(:,:) = getvar(cf_bathy, 'gdepw_0', 1, npiglo, npjglo )
   !- hz. mesh -
-  e1t(:,:)     = getvar(cf_mh  , 'e1t'  , 1, jpiglo, jpjglo)
-  e2t(:,:)     = getvar(cf_mh  , 'e2t'  , 1, jpiglo, jpjglo)
-  e1u(:,:)     = getvar(cf_mh  , 'e1u'  , 1, jpiglo, jpjglo)
-  e2u(:,:)     = getvar(cf_mh  , 'e2u'  , 1, jpiglo, jpjglo)
-  e1v(:,:)     = getvar(cf_mh  , 'e1v'  , 1, jpiglo, jpjglo)
-  e2v(:,:)     = getvar(cf_mh  , 'e2v'  , 1, jpiglo, jpjglo)
+  e1t(:,:)     = getvar(cf_mh  , cn_ve1t  , 1, npiglo, npjglo)
+  e2t(:,:)     = getvar(cf_mh  , cn_ve2t  , 1, npiglo, npjglo)
+  e1u(:,:)     = getvar(cf_mh  , cn_ve1u  , 1, npiglo, npjglo)
+  e2u(:,:)     = getvar(cf_mh  , cn_ve2u  , 1, npiglo, npjglo)
+  e1v(:,:)     = getvar(cf_mh  , cn_ve1v  , 1, npiglo, npjglo)
+  e2v(:,:)     = getvar(cf_mh  , cn_ve2v  , 1, npiglo, npjglo)
   e12t(:,:)    = e1t(:,:) * e2t(:,:)
   r1_e12u(:,:) = 1._wp / (e1u(:,:) * e2u(:,:))
   r1_e12v(:,:) = 1._wp / (e1v(:,:) * e2v(:,:))
@@ -287,28 +287,28 @@ PROGRAM cdf_dynadv_ubs
   PRINT *, '-- Creat output --'
   CALL CreateOutput
 
-  DO jk = 1, jpkm1
+  DO jk = 1, npkm1
    PRINT *, '-- klayer: ', jk
 
    !-- load vert. mesh (at rest) and masks (dommsk.f90) --
-   e3t_0(:,:) = getvar(cf_mz  , 'e3t_0' , jk, jpiglo, jpjglo)
+   e3t_0(:,:) = getvar(cf_mz  , cn_ve3t0 , jk, npiglo, npjglo)
    e3u_0(:,:) = e3t_0(:,:)
    e3v_0(:,:) = e3t_0(:,:)
-   !DO jk = 1,jpk                         ! Computed as the minimum of neighbooring scale factors
-      DO jj = 1, jpjm1
-         DO ji = 1, jpim1   ! vector opt.
+   !DO jk = 1,npk                         ! Computed as the minimum of neighbooring scale factors
+      DO jj = 1, npjm1
+         DO ji = 1, npim1   ! vector opt.
             e3u_0 (ji,jj) = MIN( e3t_0(ji,jj), e3t_0(ji+1,jj) )
             e3v_0 (ji,jj) = MIN( e3t_0(ji,jj), e3t_0(ji,jj+1) )
          END DO
       END DO
    !END DO
-   tmask(:,:) = getvar(cf_mask, 'tmask' , jk, jpiglo, jpjglo)
-   umask(:,:) = getvar(cf_mask, 'umask' , jk, jpiglo, jpjglo )
-   vmask(:,:) = getvar(cf_mask, 'vmask' , jk, jpiglo, jpjglo )
+   tmask(:,:) = getvar(cf_mask, cn_tmask , jk, npiglo, npjglo)
+   umask(:,:) = getvar(cf_mask, cn_umask , jk, npiglo, npjglo )
+   vmask(:,:) = getvar(cf_mask, cn_vmask , jk, npiglo, npjglo )
    !! fmask = 2 on lateral boundaries for no-slip bdy conditions on vorticity !!
-   fmask(:,:) = getvar(cf_mask, 'fmask' , jk, jpiglo, jpjglo )
+   fmask(:,:) = getvar(cf_mask, cn_fmask , jk, npiglo, npjglo )
 
-   DO jt = 1, jpt
+   DO jt = 1, npt
      sshn(:,:)   = 0._wp
      un(:,:,:)   = 0._wp
      vn(:,:,:)   = 0._wp
@@ -319,13 +319,13 @@ PROGRAM cdf_dynadv_ubs
         wnm(:,:,:)   = 0._wp
      END IF
      ! 
-     sshn(:,:)     = getvar(cf_ssh  , cn_sossheig, 1, jpiglo, jpjglo, ktime=jt )
+     sshn(:,:)     = getvar(cf_ssh  , cn_sossheig, 1, npiglo, npjglo, ktime=jt )
      e3t(:,:) = e3t_0(:,:) * (1 + sshn/ht_0)
      !- at u- and v- pts (domvvl.F90) -
      e3u(:,:) = e3u_0(:,:)
      e3v(:,:) = e3v_0(:,:)
-     DO jj = 1, jpjm1
-        DO ji = 1, jpim1   ! vector opt.
+     DO jj = 1, npjm1
+        DO ji = 1, npim1   ! vector opt.
            e3u(ji,jj) = e3u_0(ji,jj) + 0.5_wp * umask(ji,jj) * r1_e12u(ji,jj)                 &
               &                       * (   e12t(ji  ,jj) * ( e3t(ji  ,jj) - e3t_0(ji  ,jj) )    &
               &                           + e12t(ji+1,jj) * ( e3t(ji+1,jj) - e3t_0(ji+1,jj) ) )
@@ -338,45 +338,45 @@ PROGRAM cdf_dynadv_ubs
      !-- Load variables --
      IF ( jk == 1 ) THEN
         !- variable -
-        un(:,:,jkk  ) = getvar(cf_uu, cn_vozocrtx, jk  , jpiglo, jpjglo, ktime=jt )
-        vn(:,:,jkk  ) = getvar(cf_vv, cn_vomecrty, jk  , jpiglo, jpjglo, ktime=jt )
-        un(:,:,jkk  ) = getvar(cf_uu, cn_vozocrtx, jk  , jpiglo, jpjglo, ktime=jt )
-        vn(:,:,jkk  ) = getvar(cf_vv, cn_vomecrty, jk  , jpiglo, jpjglo, ktime=jt )
-        wn(:,:,jkk  ) = getvar(cf_ww, cn_vovecrtz, jk  , jpiglo, jpjglo, ktime=jt )
-        un(:,:,jkkp1) = getvar(cf_uu, cn_vozocrtx, jk+1, jpiglo, jpjglo, ktime=jt )
-        vn(:,:,jkkp1) = getvar(cf_vv, cn_vomecrty, jk+1, jpiglo, jpjglo, ktime=jt )
-        wn(:,:,jkkp1) = getvar(cf_ww, cn_vovecrtz, jk+1, jpiglo, jpjglo, ktime=jt )
+        un(:,:,nkk  ) = getvar(cf_uu, cn_vozocrtx, jk  , npiglo, npjglo, ktime=jt )
+        vn(:,:,nkk  ) = getvar(cf_vv, cn_vomecrty, jk  , npiglo, npjglo, ktime=jt )
+        un(:,:,nkk  ) = getvar(cf_uu, cn_vozocrtx, jk  , npiglo, npjglo, ktime=jt )
+        vn(:,:,nkk  ) = getvar(cf_vv, cn_vomecrty, jk  , npiglo, npjglo, ktime=jt )
+        wn(:,:,nkk  ) = getvar(cf_ww, cn_vovecrtz, jk  , npiglo, npjglo, ktime=jt )
+        un(:,:,nkkp1) = getvar(cf_uu, cn_vozocrtx, jk+1, npiglo, npjglo, ktime=jt )
+        vn(:,:,nkkp1) = getvar(cf_vv, cn_vomecrty, jk+1, npiglo, npjglo, ktime=jt )
+        wn(:,:,nkkp1) = getvar(cf_ww, cn_vovecrtz, jk+1, npiglo, npjglo, ktime=jt )
         !- ensemble mean -
         IF ( eddymean .NE. 'full' ) THEN
-           unm(:,:,jkk  ) = getvar(cf_um, cn_vozocrtx, jk  , jpiglo, jpjglo, ktime=jt )
-           vnm(:,:,jkk  ) = getvar(cf_vm, cn_vomecrty, jk  , jpiglo, jpjglo, ktime=jt )
-           wnm(:,:,jkk  ) = getvar(cf_wm, cn_vovecrtz, jk  , jpiglo, jpjglo, ktime=jt )
-           unm(:,:,jkkp1) = getvar(cf_um, cn_vozocrtx, jk+1, jpiglo, jpjglo, ktime=jt )
-           vnm(:,:,jkkp1) = getvar(cf_vm, cn_vomecrty, jk+1, jpiglo, jpjglo, ktime=jt )
-           wnm(:,:,jkkp1) = getvar(cf_wm, cn_vovecrtz, jk+1, jpiglo, jpjglo, ktime=jt )
+           unm(:,:,nkk  ) = getvar(cf_um, cn_vozocrtx, jk  , npiglo, npjglo, ktime=jt )
+           vnm(:,:,nkk  ) = getvar(cf_vm, cn_vomecrty, jk  , npiglo, npjglo, ktime=jt )
+           wnm(:,:,nkk  ) = getvar(cf_wm, cn_vovecrtz, jk  , npiglo, npjglo, ktime=jt )
+           unm(:,:,nkkp1) = getvar(cf_um, cn_vozocrtx, jk+1, npiglo, npjglo, ktime=jt )
+           vnm(:,:,nkkp1) = getvar(cf_vm, cn_vomecrty, jk+1, npiglo, npjglo, ktime=jt )
+           wnm(:,:,nkkp1) = getvar(cf_wm, cn_vovecrtz, jk+1, npiglo, npjglo, ktime=jt )
         END IF
      ELSE
         !- variable -
-        un(:,:,jkkm1) = getvar(cf_uu, cn_vozocrtx, jk-1, jpiglo, jpjglo, ktime=jt )
-        vn(:,:,jkkm1) = getvar(cf_vv, cn_vomecrty, jk-1, jpiglo, jpjglo, ktime=jt )
-        wn(:,:,jkkm1) = getvar(cf_ww, cn_vovecrtz, jk-1, jpiglo, jpjglo, ktime=jt )
-        un(:,:,jkk  ) = getvar(cf_uu, cn_vozocrtx, jk  , jpiglo, jpjglo, ktime=jt )
-        vn(:,:,jkk  ) = getvar(cf_vv, cn_vomecrty, jk  , jpiglo, jpjglo, ktime=jt )
-        wn(:,:,jkk  ) = getvar(cf_ww, cn_vovecrtz, jk  , jpiglo, jpjglo, ktime=jt )
-        un(:,:,jkkp1) = getvar(cf_uu, cn_vozocrtx, jk+1, jpiglo, jpjglo, ktime=jt )
-        vn(:,:,jkkp1) = getvar(cf_vv, cn_vomecrty, jk+1, jpiglo, jpjglo, ktime=jt )
-        wn(:,:,jkkp1) = getvar(cf_ww, cn_vovecrtz, jk+1, jpiglo, jpjglo, ktime=jt )
+        un(:,:,nkkm1) = getvar(cf_uu, cn_vozocrtx, jk-1, npiglo, npjglo, ktime=jt )
+        vn(:,:,nkkm1) = getvar(cf_vv, cn_vomecrty, jk-1, npiglo, npjglo, ktime=jt )
+        wn(:,:,nkkm1) = getvar(cf_ww, cn_vovecrtz, jk-1, npiglo, npjglo, ktime=jt )
+        un(:,:,nkk  ) = getvar(cf_uu, cn_vozocrtx, jk  , npiglo, npjglo, ktime=jt )
+        vn(:,:,nkk  ) = getvar(cf_vv, cn_vomecrty, jk  , npiglo, npjglo, ktime=jt )
+        wn(:,:,nkk  ) = getvar(cf_ww, cn_vovecrtz, jk  , npiglo, npjglo, ktime=jt )
+        un(:,:,nkkp1) = getvar(cf_uu, cn_vozocrtx, jk+1, npiglo, npjglo, ktime=jt )
+        vn(:,:,nkkp1) = getvar(cf_vv, cn_vomecrty, jk+1, npiglo, npjglo, ktime=jt )
+        wn(:,:,nkkp1) = getvar(cf_ww, cn_vovecrtz, jk+1, npiglo, npjglo, ktime=jt )
         !- ensemble mean -
         IF ( eddymean .NE. 'full' ) THEN
-           unm(:,:,jkkm1) = getvar(cf_um, cn_vozocrtx, jk-1, jpiglo, jpjglo, ktime=jt )
-           vnm(:,:,jkkm1) = getvar(cf_vm, cn_vomecrty, jk-1, jpiglo, jpjglo, ktime=jt )
-           wnm(:,:,jkkm1) = getvar(cf_wm, cn_vovecrtz, jk-1, jpiglo, jpjglo, ktime=jt )
-           unm(:,:,jkk  ) = getvar(cf_um, cn_vozocrtx, jk  , jpiglo, jpjglo, ktime=jt )
-           vnm(:,:,jkk  ) = getvar(cf_vm, cn_vomecrty, jk  , jpiglo, jpjglo, ktime=jt )
-           wnm(:,:,jkk  ) = getvar(cf_wm, cn_vovecrtz, jk  , jpiglo, jpjglo, ktime=jt )
-           unm(:,:,jkkp1) = getvar(cf_um, cn_vozocrtx, jk+1, jpiglo, jpjglo, ktime=jt )
-           vnm(:,:,jkkp1) = getvar(cf_vm, cn_vomecrty, jk+1, jpiglo, jpjglo, ktime=jt )
-           wnm(:,:,jkkp1) = getvar(cf_wm, cn_vovecrtz, jk+1, jpiglo, jpjglo, ktime=jt )
+           unm(:,:,nkkm1) = getvar(cf_um, cn_vozocrtx, jk-1, npiglo, npjglo, ktime=jt )
+           vnm(:,:,nkkm1) = getvar(cf_vm, cn_vomecrty, jk-1, npiglo, npjglo, ktime=jt )
+           wnm(:,:,nkkm1) = getvar(cf_wm, cn_vovecrtz, jk-1, npiglo, npjglo, ktime=jt )
+           unm(:,:,nkk  ) = getvar(cf_um, cn_vozocrtx, jk  , npiglo, npjglo, ktime=jt )
+           vnm(:,:,nkk  ) = getvar(cf_vm, cn_vomecrty, jk  , npiglo, npjglo, ktime=jt )
+           wnm(:,:,nkk  ) = getvar(cf_wm, cn_vovecrtz, jk  , npiglo, npjglo, ktime=jt )
+           unm(:,:,nkkp1) = getvar(cf_um, cn_vozocrtx, jk+1, npiglo, npjglo, ktime=jt )
+           vnm(:,:,nkkp1) = getvar(cf_vm, cn_vomecrty, jk+1, npiglo, npjglo, ktime=jt )
+           wnm(:,:,nkkp1) = getvar(cf_wm, cn_vovecrtz, jk+1, npiglo, npjglo, ktime=jt )
         END IF
      ENDIF
 
@@ -384,81 +384,81 @@ PROGRAM cdf_dynadv_ubs
      SELECT CASE (eddymean)
      CASE ('full' ) ;
         CALL dyn_adv_ubs( jt, jk, un, vn, wn, un, vn )
-        ierr = putvar(ncout_u , id_varout_u(1) , adv_h_u(:,:) , jk, jpiglo, jpjglo, ktime=jt )
-        ierr = putvar(ncout_u , id_varout_u(2) , adv_z_u(:,:) , jk, jpiglo, jpjglo, ktime=jt )
-        ierr = putvar(ncout_v , id_varout_v(1) , adv_h_v(:,:) , jk, jpiglo, jpjglo, ktime=jt )
-        ierr = putvar(ncout_v , id_varout_v(2) , adv_z_v(:,:) , jk, jpiglo, jpjglo, ktime=jt )
+        ierr = putvar(ncout_u , id_varout_u(1) , adv_h_u(:,:) , jk, npiglo, npjglo, ktime=jt )
+        ierr = putvar(ncout_u , id_varout_u(2) , adv_z_u(:,:) , jk, npiglo, npjglo, ktime=jt )
+        ierr = putvar(ncout_v , id_varout_v(1) , adv_h_v(:,:) , jk, npiglo, npjglo, ktime=jt )
+        ierr = putvar(ncout_v , id_varout_v(2) , adv_z_v(:,:) , jk, npiglo, npjglo, ktime=jt )
         ! KE
         CALL trd_ken( adv_h_u, adv_h_v, adv_h_ke, un, vn )
         CALL trd_ken( adv_z_u, adv_z_v, adv_z_ke, un, vn )
-        ierr = putvar(ncout_ke, id_varout_ke(1), adv_h_ke(:,:), jk, jpiglo, jpjglo, ktime=jt )
-        ierr = putvar(ncout_ke, id_varout_ke(2), adv_z_ke(:,:), jk, jpiglo, jpjglo, ktime=jt )
+        ierr = putvar(ncout_ke, id_varout_ke(1), adv_h_ke(:,:), jk, npiglo, npjglo, ktime=jt )
+        ierr = putvar(ncout_ke, id_varout_ke(2), adv_z_ke(:,:), jk, npiglo, npjglo, ktime=jt )
      CASE ('mean-mean') ;
         CALL dyn_adv_ubs( jt, jk, unm, vnm, wnm, unm, vnm )
-        ierr = putvar(ncout_u , id_varout_u(1) , adv_h_u(:,:) , jk, jpiglo, jpjglo, ktime=jt )
-        ierr = putvar(ncout_u , id_varout_u(2) , adv_z_u(:,:) , jk, jpiglo, jpjglo, ktime=jt )
-        ierr = putvar(ncout_v , id_varout_v(1) , adv_h_v(:,:) , jk, jpiglo, jpjglo, ktime=jt )
-        ierr = putvar(ncout_v , id_varout_v(2) , adv_z_v(:,:) , jk, jpiglo, jpjglo, ktime=jt )
+        ierr = putvar(ncout_u , id_varout_u(1) , adv_h_u(:,:) , jk, npiglo, npjglo, ktime=jt )
+        ierr = putvar(ncout_u , id_varout_u(2) , adv_z_u(:,:) , jk, npiglo, npjglo, ktime=jt )
+        ierr = putvar(ncout_v , id_varout_v(1) , adv_h_v(:,:) , jk, npiglo, npjglo, ktime=jt )
+        ierr = putvar(ncout_v , id_varout_v(2) , adv_z_v(:,:) , jk, npiglo, npjglo, ktime=jt )
         ! KE  --  ubar*
         CALL trd_ken( adv_h_u, adv_h_v, adv_h_ke, unm, vnm )
         CALL trd_ken( adv_z_u, adv_z_v, adv_z_ke, unm, vnm )
-        ierr = putvar(ncout_ke, id_varout_ke(1), adv_h_ke(:,:), jk, jpiglo, jpjglo, ktime=jt )
-        ierr = putvar(ncout_ke, id_varout_ke(2), adv_z_ke(:,:), jk, jpiglo, jpjglo, ktime=jt )
+        ierr = putvar(ncout_ke, id_varout_ke(1), adv_h_ke(:,:), jk, npiglo, npjglo, ktime=jt )
+        ierr = putvar(ncout_ke, id_varout_ke(2), adv_z_ke(:,:), jk, npiglo, npjglo, ktime=jt )
         ! KE  --  uprime*
         CALL trd_ken( adv_h_u, adv_h_v, adv_h_ke, un(:,:,:)-unm(:,:,:), vn(:,:,:)-vnm(:,:,:) )
         CALL trd_ken( adv_z_u, adv_z_v, adv_z_ke, un(:,:,:)-unm(:,:,:), vn(:,:,:)-vnm(:,:,:) )
-        ierr = putvar(ncout_ke, id_varout_ke(3), adv_h_ke(:,:), jk, jpiglo, jpjglo, ktime=jt )
-        ierr = putvar(ncout_ke, id_varout_ke(4), adv_z_ke(:,:), jk, jpiglo, jpjglo, ktime=jt )
+        ierr = putvar(ncout_ke, id_varout_ke(3), adv_h_ke(:,:), jk, npiglo, npjglo, ktime=jt )
+        ierr = putvar(ncout_ke, id_varout_ke(4), adv_z_ke(:,:), jk, npiglo, npjglo, ktime=jt )
      CASE ('mean-eddy') ;
         CALL dyn_adv_ubs( jt, jk, unm, vnm, wnm, un(:,:,:)-unm(:,:,:), vn(:,:,:)-vnm(:,:,:) )
-        ierr = putvar(ncout_u , id_varout_u(1) , adv_h_u(:,:) , jk, jpiglo, jpjglo, ktime=jt )
-        ierr = putvar(ncout_u , id_varout_u(2) , adv_z_u(:,:) , jk, jpiglo, jpjglo, ktime=jt )
-        ierr = putvar(ncout_v , id_varout_v(1) , adv_h_v(:,:) , jk, jpiglo, jpjglo, ktime=jt )
-        ierr = putvar(ncout_v , id_varout_v(2) , adv_z_v(:,:) , jk, jpiglo, jpjglo, ktime=jt )
+        ierr = putvar(ncout_u , id_varout_u(1) , adv_h_u(:,:) , jk, npiglo, npjglo, ktime=jt )
+        ierr = putvar(ncout_u , id_varout_u(2) , adv_z_u(:,:) , jk, npiglo, npjglo, ktime=jt )
+        ierr = putvar(ncout_v , id_varout_v(1) , adv_h_v(:,:) , jk, npiglo, npjglo, ktime=jt )
+        ierr = putvar(ncout_v , id_varout_v(2) , adv_z_v(:,:) , jk, npiglo, npjglo, ktime=jt )
         ! KE  --  ubar*
         CALL trd_ken( adv_h_u, adv_h_v, adv_h_ke, unm, vnm )
         CALL trd_ken( adv_z_u, adv_z_v, adv_z_ke, unm, vnm )
-        ierr = putvar(ncout_ke, id_varout_ke(1), adv_h_ke(:,:), jk, jpiglo, jpjglo, ktime=jt )
-        ierr = putvar(ncout_ke, id_varout_ke(2), adv_z_ke(:,:), jk, jpiglo, jpjglo, ktime=jt )
+        ierr = putvar(ncout_ke, id_varout_ke(1), adv_h_ke(:,:), jk, npiglo, npjglo, ktime=jt )
+        ierr = putvar(ncout_ke, id_varout_ke(2), adv_z_ke(:,:), jk, npiglo, npjglo, ktime=jt )
         ! KE  --  uprime*
         CALL trd_ken( adv_h_u, adv_h_v, adv_h_ke, un(:,:,:)-unm(:,:,:), vn(:,:,:)-vnm(:,:,:) )
         CALL trd_ken( adv_z_u, adv_z_v, adv_z_ke, un(:,:,:)-unm(:,:,:), vn(:,:,:)-vnm(:,:,:) )
-        ierr = putvar(ncout_ke, id_varout_ke(3), adv_h_ke(:,:), jk, jpiglo, jpjglo, ktime=jt )
-        ierr = putvar(ncout_ke, id_varout_ke(4), adv_z_ke(:,:), jk, jpiglo, jpjglo, ktime=jt )
+        ierr = putvar(ncout_ke, id_varout_ke(3), adv_h_ke(:,:), jk, npiglo, npjglo, ktime=jt )
+        ierr = putvar(ncout_ke, id_varout_ke(4), adv_z_ke(:,:), jk, npiglo, npjglo, ktime=jt )
      CASE ('eddy-mean') ;
         CALL dyn_adv_ubs( jt, jk, un(:,:,:)-unm(:,:,:), vn(:,:,:)-vnm(:,:,:), &
                    & wn(:,:,:)-wnm(:,:,:), unm, vnm )
-        ierr = putvar(ncout_u , id_varout_u(1) , adv_h_u(:,:) , jk, jpiglo, jpjglo, ktime=jt )
-        ierr = putvar(ncout_u , id_varout_u(2) , adv_z_u(:,:) , jk, jpiglo, jpjglo, ktime=jt )
-        ierr = putvar(ncout_v , id_varout_v(1) , adv_h_v(:,:) , jk, jpiglo, jpjglo, ktime=jt )
-        ierr = putvar(ncout_v , id_varout_v(2) , adv_z_v(:,:) , jk, jpiglo, jpjglo, ktime=jt )
+        ierr = putvar(ncout_u , id_varout_u(1) , adv_h_u(:,:) , jk, npiglo, npjglo, ktime=jt )
+        ierr = putvar(ncout_u , id_varout_u(2) , adv_z_u(:,:) , jk, npiglo, npjglo, ktime=jt )
+        ierr = putvar(ncout_v , id_varout_v(1) , adv_h_v(:,:) , jk, npiglo, npjglo, ktime=jt )
+        ierr = putvar(ncout_v , id_varout_v(2) , adv_z_v(:,:) , jk, npiglo, npjglo, ktime=jt )
         ! KE  --  ubar*
         CALL trd_ken( adv_h_u, adv_h_v, adv_h_ke, unm, vnm )
         CALL trd_ken( adv_z_u, adv_z_v, adv_z_ke, unm, vnm )
-        ierr = putvar(ncout_ke, id_varout_ke(1), adv_h_ke(:,:), jk, jpiglo, jpjglo, ktime=jt )
-        ierr = putvar(ncout_ke, id_varout_ke(2), adv_z_ke(:,:), jk, jpiglo, jpjglo, ktime=jt )
+        ierr = putvar(ncout_ke, id_varout_ke(1), adv_h_ke(:,:), jk, npiglo, npjglo, ktime=jt )
+        ierr = putvar(ncout_ke, id_varout_ke(2), adv_z_ke(:,:), jk, npiglo, npjglo, ktime=jt )
         ! KE  --  uprime*
         CALL trd_ken( adv_h_u, adv_h_v, adv_h_ke, un(:,:,:)-unm(:,:,:), vn(:,:,:)-vnm(:,:,:) )
         CALL trd_ken( adv_z_u, adv_z_v, adv_z_ke, un(:,:,:)-unm(:,:,:), vn(:,:,:)-vnm(:,:,:) )
-        ierr = putvar(ncout_ke, id_varout_ke(3), adv_h_ke(:,:), jk, jpiglo, jpjglo, ktime=jt )
-        ierr = putvar(ncout_ke, id_varout_ke(4), adv_z_ke(:,:), jk, jpiglo, jpjglo, ktime=jt )
+        ierr = putvar(ncout_ke, id_varout_ke(3), adv_h_ke(:,:), jk, npiglo, npjglo, ktime=jt )
+        ierr = putvar(ncout_ke, id_varout_ke(4), adv_z_ke(:,:), jk, npiglo, npjglo, ktime=jt )
      CASE ('eddy-eddy') ;
         CALL dyn_adv_ubs( jt, jk, un(:,:,:)-unm(:,:,:), vn(:,:,:)-vnm(:,:,:), wn(:,:,:)-wnm(:,:,:), &
                    & un(:,:,:)-unm(:,:,:), vn(:,:,:)-vnm(:,:,:) )
-        ierr = putvar(ncout_u , id_varout_u(1) , adv_h_u(:,:) , jk, jpiglo, jpjglo, ktime=jt )
-        ierr = putvar(ncout_u , id_varout_u(2) , adv_z_u(:,:) , jk, jpiglo, jpjglo, ktime=jt )
-        ierr = putvar(ncout_v , id_varout_v(1) , adv_h_v(:,:) , jk, jpiglo, jpjglo, ktime=jt )
-        ierr = putvar(ncout_v , id_varout_v(2) , adv_z_v(:,:) , jk, jpiglo, jpjglo, ktime=jt )
+        ierr = putvar(ncout_u , id_varout_u(1) , adv_h_u(:,:) , jk, npiglo, npjglo, ktime=jt )
+        ierr = putvar(ncout_u , id_varout_u(2) , adv_z_u(:,:) , jk, npiglo, npjglo, ktime=jt )
+        ierr = putvar(ncout_v , id_varout_v(1) , adv_h_v(:,:) , jk, npiglo, npjglo, ktime=jt )
+        ierr = putvar(ncout_v , id_varout_v(2) , adv_z_v(:,:) , jk, npiglo, npjglo, ktime=jt )
         ! KE  --  ubar*
         CALL trd_ken( adv_h_u, adv_h_v, adv_h_ke, unm, vnm )
         CALL trd_ken( adv_z_u, adv_z_v, adv_z_ke, unm, vnm )
-        ierr = putvar(ncout_ke, id_varout_ke(1), adv_h_ke(:,:), jk, jpiglo, jpjglo, ktime=jt )
-        ierr = putvar(ncout_ke, id_varout_ke(2), adv_z_ke(:,:), jk, jpiglo, jpjglo, ktime=jt )
+        ierr = putvar(ncout_ke, id_varout_ke(1), adv_h_ke(:,:), jk, npiglo, npjglo, ktime=jt )
+        ierr = putvar(ncout_ke, id_varout_ke(2), adv_z_ke(:,:), jk, npiglo, npjglo, ktime=jt )
         ! KE  --  uprime*
         CALL trd_ken( adv_h_u, adv_h_v, adv_h_ke, un(:,:,:)-unm(:,:,:), vn(:,:,:)-vnm(:,:,:) )
         CALL trd_ken( adv_z_u, adv_z_v, adv_z_ke, un(:,:,:)-unm(:,:,:), vn(:,:,:)-vnm(:,:,:) )
-        ierr = putvar(ncout_ke, id_varout_ke(3), adv_h_ke(:,:), jk, jpiglo, jpjglo, ktime=jt )
-        ierr = putvar(ncout_ke, id_varout_ke(4), adv_z_ke(:,:), jk, jpiglo, jpjglo, ktime=jt )
+        ierr = putvar(ncout_ke, id_varout_ke(3), adv_h_ke(:,:), jk, npiglo, npjglo, ktime=jt )
+        ierr = putvar(ncout_ke, id_varout_ke(4), adv_z_ke(:,:), jk, npiglo, npjglo, ktime=jt )
      END SELECT
 
    ENDDO       !jt-loop
@@ -470,7 +470,7 @@ PROGRAM cdf_dynadv_ubs
 
 CONTAINS
 
-   SUBROUTINE dyn_adv_ubs( kt, jk, u1, v1, w1, u2, v2 )
+   SUBROUTINE dyn_adv_ubs( kt, kk, u1, v1, w1, u2, v2 )
 !!----------------------------------------------------------------------
 !!                  ***  ROUTINE dyn_adv_ubs  ***
 !!
@@ -498,7 +498,7 @@ CONTAINS
 !! Reference : Shchepetkin & McWilliams, 2005, Ocean Modelling.
 !!----------------------------------------------------------------------
       INTEGER, INTENT(in) ::   kt     ! ocean time-step index
-      INTEGER, INTENT(in) ::   jk     ! ocean vertical level
+      INTEGER, INTENT(in) ::   kk     ! ocean vertical level
       REAL(wp), DIMENSION(:,:,:), INTENT(in   ) ::   u1, v1, w1   ! U, V and W ocean advecting velocities
       REAL(wp), DIMENSION(:,:,:), INTENT(in   ) ::   u2, v2       ! U and V    ocean advected  velocities
 !
@@ -512,15 +512,15 @@ CONTAINS
       REAL(wp), POINTER, DIMENSION(:,:,:  ) ::  zlu_uu, zlv_vv, zlu_uv, zlv_vu
 !!----------------------------------------------------------------------
 !
-      ALLOCATE( zfu(jpiglo, jpjglo)       , zfv(jpiglo, jpjglo)       )
-      ALLOCATE( zfu2(jpiglo, jpjglo)      , zfv2(jpiglo, jpjglo)      )
-      ALLOCATE( zfw(jpiglo, jpjglo, jpkk)                             )
-      ALLOCATE( zfu_t(jpiglo, jpjglo)     , zfv_t(jpiglo, jpjglo)     )
-      ALLOCATE( zfu_f(jpiglo, jpjglo)     , zfv_f(jpiglo, jpjglo)     )
-      ALLOCATE( zfu_uw(jpiglo, jpjglo, jpkk)    , zfv_vw(jpiglo, jpjglo, jpkk)    )
+      ALLOCATE( zfu(npiglo, npjglo)       , zfv(npiglo, npjglo)       )
+      ALLOCATE( zfu2(npiglo, npjglo)      , zfv2(npiglo, npjglo)      )
+      ALLOCATE( zfw(npiglo, npjglo, npkk)                             )
+      ALLOCATE( zfu_t(npiglo, npjglo)     , zfv_t(npiglo, npjglo)     )
+      ALLOCATE( zfu_f(npiglo, npjglo)     , zfv_f(npiglo, npjglo)     )
+      ALLOCATE( zfu_uw(npiglo, npjglo, npkk)    , zfv_vw(npiglo, npjglo, npkk)    )
       !
-      ALLOCATE( zlu_uu(jpiglo, jpjglo, 2) , zlv_vv(jpiglo, jpjglo, 2) )
-      ALLOCATE( zlu_uv(jpiglo, jpjglo, 2) , zlv_vu(jpiglo, jpjglo, 2) )
+      ALLOCATE( zlu_uu(npiglo, npjglo, 2) , zlv_vv(npiglo, npjglo, 2) )
+      ALLOCATE( zlu_uv(npiglo, npjglo, 2) , zlv_vu(npiglo, npjglo, 2) )
 
 !
       zfu_t(:,:)    = 0._wp
@@ -539,18 +539,18 @@ CONTAINS
                                        !  Laplacian of the velocity  !
 !                                      ! =========================== !
 !                                         ! horizontal volume fluxes
-         zfu(:,:) = e2u(:,:) * e3u(:,:) * u1(:,:,jkk)
-         zfv(:,:) = e1v(:,:) * e3v(:,:) * v1(:,:,jkk)
+         zfu(:,:) = e2u(:,:) * e3u(:,:) * u1(:,:,nkk)
+         zfv(:,:) = e1v(:,:) * e3v(:,:) * v1(:,:,nkk)
 !
-         DO jj = 2, jpjm1                          ! laplacian
-            DO ji = 2, jpim1   ! vector opt.
+         DO jj = 2, npjm1                          ! laplacian
+            DO ji = 2, npim1   ! vector opt.
 !
-               zlu_uu(ji,jj,1) = ( u2 (ji+1,jj  ,jkk) - 2.*u2 (ji,jj,jkk) + u2 (ji-1,jj  ,jkk) ) * umask(ji,jj)
-               zlv_vv(ji,jj,1) = ( v2 (ji  ,jj+1,jkk) - 2.*v2 (ji,jj,jkk) + v2 (ji  ,jj-1,jkk) ) * vmask(ji,jj)
-               zlu_uv(ji,jj,1) = ( u2 (ji  ,jj+1,jkk) - u2 (ji  ,jj  ,jkk) ) * fmask(ji  ,jj  )   &
-                  &               - ( u2 (ji  ,jj  ,jkk) - u2 (ji  ,jj-1,jkk) ) * fmask(ji  ,jj-1)
-               zlv_vu(ji,jj,1) = ( v2 (ji+1,jj  ,jkk) - v2 (ji  ,jj  ,jkk) ) * fmask(ji  ,jj  )   &
-                  &               - ( v2 (ji  ,jj  ,jkk) - v2 (ji-1,jj  ,jkk) ) * fmask(ji-1,jj  )
+               zlu_uu(ji,jj,1) = ( u2 (ji+1,jj  ,nkk) - 2.*u2 (ji,jj,nkk) + u2 (ji-1,jj  ,nkk) ) * umask(ji,jj)
+               zlv_vv(ji,jj,1) = ( v2 (ji  ,jj+1,nkk) - 2.*v2 (ji,jj,nkk) + v2 (ji  ,jj-1,nkk) ) * vmask(ji,jj)
+               zlu_uv(ji,jj,1) = ( u2 (ji  ,jj+1,nkk) - u2 (ji  ,jj  ,nkk) ) * fmask(ji  ,jj  )   &
+                  &               - ( u2 (ji  ,jj  ,nkk) - u2 (ji  ,jj-1,nkk) ) * fmask(ji  ,jj-1)
+               zlv_vu(ji,jj,1) = ( v2 (ji+1,jj  ,nkk) - v2 (ji  ,jj  ,nkk) ) * fmask(ji  ,jj  )   &
+                  &               - ( v2 (ji  ,jj  ,nkk) - v2 (ji-1,jj  ,nkk) ) * fmask(ji-1,jj  )
 !
                zlu_uu(ji,jj,2) = ( zfu(ji+1,jj  ) - 2.*zfu(ji,jj) + zfu(ji-1,jj  ) ) * umask(ji,jj)
                zlv_vv(ji,jj,2) = ( zfv(ji  ,jj+1) - 2.*zfv(ji,jj) + zfv(ji  ,jj-1) ) * vmask(ji,jj)
@@ -565,13 +565,13 @@ CONTAINS
 !                                      !  Horizontal advection  !
                                        ! ====================== !
 !                                         ! horizontal volume fluxes
-         zfu(:,:) = 0.25 * e2u(:,:) * e3u(:,:) * u1(:,:,jkk)
-         zfv(:,:) = 0.25 * e1v(:,:) * e3v(:,:) * v1(:,:,jkk)
+         zfu(:,:) = 0.25 * e2u(:,:) * e3u(:,:) * u1(:,:,nkk)
+         zfv(:,:) = 0.25 * e1v(:,:) * e3v(:,:) * v1(:,:,nkk)
 !
-         DO jj = 1, jpjm1                          ! horizontal momentum fluxes at T- and F-point
-            DO ji = 1, jpim1   ! vector opt.
-               zui = ( u2(ji,jj,jkk) + u2(ji+1,jj  ,jkk) )
-               zvj = ( v2(ji,jj,jkk) + v2(ji  ,jj+1,jkk) )
+         DO jj = 1, npjm1                          ! horizontal momentum fluxes at T- and F-point
+            DO ji = 1, npim1   ! vector opt.
+               zui = ( u2(ji,jj,nkk) + u2(ji+1,jj  ,nkk) )
+               zvj = ( v2(ji,jj,nkk) + v2(ji  ,jj+1,nkk) )
                IF (zui > 0) THEN   ;   zl_u = zlu_uu(ji  ,jj,1)
                ELSE                ;   zl_u = zlu_uu(ji+1,jj,1)
                ENDIF
@@ -580,11 +580,11 @@ CONTAINS
                ENDIF
 !
                zfu_t(ji+1,jj  ) = ( zfu(ji,jj) + zfu(ji+1,jj  )                               &
-                  &                    - gamma2 * ( zlu_uu(ji,jj,2) + zlu_uu(ji+1,jj  ,2) )  )   &
-                  &                * ( zui - gamma1 * zl_u)
+                  &                    - pp_gamma2 * ( zlu_uu(ji,jj,2) + zlu_uu(ji+1,jj  ,2) )  )   &
+                  &                * ( zui - pp_gamma1 * zl_u)
                zfv_t(ji  ,jj+1) = ( zfv(ji,jj) + zfv(ji  ,jj+1)                               &
-                  &                    - gamma2 * ( zlv_vv(ji,jj,2) + zlv_vv(ji  ,jj+1,2) )  )   &
-                  &                * ( zvj - gamma1 * zl_v)
+                  &                    - pp_gamma2 * ( zlv_vv(ji,jj,2) + zlv_vv(ji  ,jj+1,2) )  )   &
+                  &                * ( zvj - pp_gamma1 * zl_v)
 !
                zfuj = ( zfu(ji,jj) + zfu(ji  ,jj+1) )
                zfvi = ( zfv(ji,jj) + zfv(ji+1,jj  ) )
@@ -595,14 +595,14 @@ CONTAINS
                ELSE                 ;    zl_u = zlu_uv( ji,jj+1,1)
                ENDIF
 !
-               zfv_f(ji  ,jj  ) = ( zfvi - gamma2 * ( zlv_vu(ji,jj,2) + zlv_vu(ji+1,jj  ,2) )  )   &
-                  &                * ( u2(ji,jj,jkk) + u2(ji  ,jj+1,jkk) - gamma1 * zl_u )
-               zfu_f(ji  ,jj  ) = ( zfuj - gamma2 * ( zlu_uv(ji,jj,2) + zlu_uv(ji  ,jj+1,2) )  )   &
-                  &                * ( v2(ji,jj,jkk) + v2(ji+1,jj  ,jkk) - gamma1 * zl_v )
+               zfv_f(ji  ,jj  ) = ( zfvi - pp_gamma2 * ( zlv_vu(ji,jj,2) + zlv_vu(ji+1,jj  ,2) )  )   &
+                  &                * ( u2(ji,jj,nkk) + u2(ji  ,jj+1,nkk) - pp_gamma1 * zl_u )
+               zfu_f(ji  ,jj  ) = ( zfuj - pp_gamma2 * ( zlu_uv(ji,jj,2) + zlu_uv(ji  ,jj+1,2) )  )   &
+                  &                * ( v2(ji,jj,nkk) + v2(ji+1,jj  ,nkk) - pp_gamma1 * zl_v )
             END DO
          END DO
-         DO jj = 2, jpjm1                          ! divergence of horizontal momentum fluxes
-            DO ji = 2, jpim1   ! vector opt.
+         DO jj = 2, npjm1                          ! divergence of horizontal momentum fluxes
+            DO ji = 2, npim1   ! vector opt.
                zbu = e1u(ji,jj) * e2u(ji,jj) * e3u(ji,jj)
                zbv = e1v(ji,jj) * e2v(ji,jj) * e3v(ji,jj)
 !
@@ -620,39 +620,39 @@ CONTAINS
 !                                      !  Vertical advection  !
                                        ! ==================== !
 !                                         ! Vertical volume fluxes
-         zfw(:,:,jkk) = 0.25 * e1t(:,:) * e2t(:,:) * w1(:,:,jkk)
-         zfw(:,:,jkkp1) = 0.25 * e1t(:,:) * e2t(:,:) * w1(:,:,jkkp1)
+         zfw(:,:,nkk) = 0.25 * e1t(:,:) * e2t(:,:) * w1(:,:,nkk)
+         zfw(:,:,nkkp1) = 0.25 * e1t(:,:) * e2t(:,:) * w1(:,:,nkkp1)
 !
-   !      IF( jk == 1 ) THEN                        ! surface/bottom advective fluxes
+   !      IF( kk == 1 ) THEN                        ! surface/bottom advective fluxes
    !       ... moved after interior fluxes ...
    !      ELSE                                      ! interior fluxes
-            DO jj = 2, jpjm1
-               DO ji = 2, jpim1   ! vector opt.
-                  zfu_uw(ji,jj,jkk) = ( zfw(ji,jj,jkk)+ zfw(ji+1,jj  ,jkk) ) * ( u2(ji,jj,jkk) + u2(ji,jj,jkkm1) )
-                  zfv_vw(ji,jj,jkk) = ( zfw(ji,jj,jkk)+ zfw(ji  ,jj+1,jkk) ) * ( v2(ji,jj,jkk) + v2(ji,jj,jkkm1) )
-                  zfu_uw(ji,jj,jkkp1) = ( zfw(ji,jj,jkkp1)+ zfw(ji+1,jj  ,jkkp1) ) * ( u2(ji,jj,jkkp1) + u2(ji,jj,jkk) )
-                  zfv_vw(ji,jj,jkkp1) = ( zfw(ji,jj,jkkp1)+ zfw(ji  ,jj+1,jkkp1) ) * ( v2(ji,jj,jkkp1) + v2(ji,jj,jkk) )
+            DO jj = 2, npjm1
+               DO ji = 2, npim1   ! vector opt.
+                  zfu_uw(ji,jj,nkk) = ( zfw(ji,jj,nkk)+ zfw(ji+1,jj  ,nkk) ) * ( u2(ji,jj,nkk) + u2(ji,jj,nkkm1) )
+                  zfv_vw(ji,jj,nkk) = ( zfw(ji,jj,nkk)+ zfw(ji  ,jj+1,nkk) ) * ( v2(ji,jj,nkk) + v2(ji,jj,nkkm1) )
+                  zfu_uw(ji,jj,nkkp1) = ( zfw(ji,jj,nkkp1)+ zfw(ji+1,jj  ,nkkp1) ) * ( u2(ji,jj,nkkp1) + u2(ji,jj,nkk) )
+                  zfv_vw(ji,jj,nkkp1) = ( zfw(ji,jj,nkkp1)+ zfw(ji  ,jj+1,nkkp1) ) * ( v2(ji,jj,nkkp1) + v2(ji,jj,nkk) )
                END DO
             END DO
     !     ENDIF
-         IF( jk == jpkm1 ) THEN
-            zfu_uw(:,:,jkkp1) = 0.e0                      ! Bottom  value : flux set to zero
-            zfv_vw(:,:,jkkp1) = 0.e0
+         IF( kk == npkm1 ) THEN
+            zfu_uw(:,:,nkkp1) = 0.e0                      ! Bottom  value : flux set to zero
+            zfv_vw(:,:,nkkp1) = 0.e0
          ENDIF
-         IF ( jk == 1 ) THEN                        ! Surface value :
+         IF ( kk == 1 ) THEN                        ! Surface value :
 !            IF( lk_vvl ) THEN                                ! variable volume : flux set to zero
-               zfu_uw(:,:, jkk ) = 0.e0
-               zfv_vw(:,:, jkk ) = 0.e0
+               zfu_uw(:,:, nkk ) = 0.e0
+               zfv_vw(:,:, nkk ) = 0.e0
 !            ELSE                                             ! constant volume : advection through the surface
 !               ...
 !            ENDIF
          ENDIF
 
-         DO jj = 2, jpjm1
-            DO ji = 2, jpim1   ! vector opt.
-               adv_z_u(ji,jj) =  - ( zfu_uw(ji,jj,jkk) - zfu_uw(ji,jj,jkkp1) )    &
+         DO jj = 2, npjm1
+            DO ji = 2, npim1   ! vector opt.
+               adv_z_u(ji,jj) =  - ( zfu_uw(ji,jj,nkk) - zfu_uw(ji,jj,nkkp1) )    &
                   &  / ( e1u(ji,jj) * e2u(ji,jj) * e3u(ji,jj) )
-               adv_z_v(ji,jj) =  - ( zfv_vw(ji,jj,jkk) - zfv_vw(ji,jj,jkkp1) )    &
+               adv_z_v(ji,jj) =  - ( zfv_vw(ji,jj,nkk) - zfv_vw(ji,jj,nkkp1) )    &
                   &  / ( e1v(ji,jj) * e2v(ji,jj) * e3v(ji,jj) )
 !
                adv_z_u(ji,jj) = adv_z_u(ji,jj) * umask(ji,jj)
@@ -690,7 +690,7 @@ CONTAINS
       REAL(wp), DIMENSION(:,:,:), INTENT(in   ) ::   u0, v0       ! U and V 
       REAL(wp), DIMENSION(:,:), INTENT(inout) ::   ktrd           ! KE trend
 !
-      INTEGER ::   ji, jj, jk       ! dummy loop indices
+      INTEGER ::   ji, jj       ! dummy loop indices
 !
       REAL(wp)                                :: rau0 = 1026._wp    ! volumic mass of reference     [kg/m3] (from phycst.F90)
       REAL(wp), ALLOCATABLE, DIMENSION(:,:) ::   bu, bv   ! volume of u- and v-boxes
@@ -698,7 +698,7 @@ CONTAINS
 !!----------------------------------------------------------------------
 !
 !
-      ALLOCATE( bu(jpiglo,jpjglo) , bv(jpiglo,jpjglo) , r1_bt(jpiglo,jpjglo) )
+      ALLOCATE( bu(npiglo,npjglo) , bv(npiglo,npjglo) , r1_bt(npiglo,npjglo) )
 !
 !      IF ( lk_vvl .AND. kt /= nkstp ) THEN   ! Variable volume: set box volume at the 1st call of kt time step
 !         nkstp = kt
@@ -708,12 +708,12 @@ CONTAINS
 !
       ktrd(:,:) = 0._wp
       ktrd(:,:) = 0._wp
-      DO jj = 2, jpjglo
-         DO ji = 2, jpiglo
-            ktrd(ji,jj) = 0.5_wp * rau0 *( u0(ji  ,jj,jkk) * putrd(ji  ,jj) * bu(ji  ,jj)  &
-               &                            + u0(ji-1,jj,jkk) * putrd(ji-1,jj) * bu(ji-1,jj)  &
-               &                            + v0(ji,jj  ,jkk) * pvtrd(ji,jj  ) * bv(ji,jj  )  &
-               &                            + v0(ji,jj-1,jkk) * pvtrd(ji,jj-1) * bv(ji,jj-1)  ) * r1_bt(ji,jj)
+      DO jj = 2, npjglo
+         DO ji = 2, npiglo
+            ktrd(ji,jj) = 0.5_wp * rau0 *( u0(ji  ,jj,nkk) * putrd(ji  ,jj) * bu(ji  ,jj)  &
+               &                            + u0(ji-1,jj,nkk) * putrd(ji-1,jj) * bu(ji-1,jj)  &
+               &                            + v0(ji,jj  ,nkk) * pvtrd(ji,jj  ) * bv(ji,jj  )  &
+               &                            + v0(ji,jj-1,nkk) * pvtrd(ji,jj-1) * bv(ji,jj-1)  ) * r1_bt(ji,jj)
          END DO
       END DO
 
@@ -731,8 +731,8 @@ CONTAINS
     !!
     !!----------------------------------------------------------------------
     ! define new variables for output
-    ipk1(:)                        = jpk
-    stypvar1(1)%ichunk             = (/jpiglo,MAX(1,jpjglo/30),1,1 /)
+    ipk1(:)                        = npk
+    stypvar1(1)%ichunk             = (/npiglo,MAX(1,npjglo/30),1,1 /)
     stypvar1(1)%cname              = 'advh_uu'
     stypvar1(1)%cunits             = 'm/s^2'
     stypvar1(1)%rmissing_value     = 99999.
@@ -743,7 +743,7 @@ CONTAINS
     stypvar1(1)%conline_operation  = 'On u-grid'
     stypvar1(1)%caxis              = 'time depthu nav_lon_u nav_lat_u'
     !
-    stypvar1(2)%ichunk             = (/jpiglo,MAX(1,jpjglo/30),1,1 /)
+    stypvar1(2)%ichunk             = (/npiglo,MAX(1,npjglo/30),1,1 /)
     stypvar1(2)%cname              = 'advz_uu'
     stypvar1(2)%cunits             = 'm/s^2'
     stypvar1(2)%rmissing_value     = 99999.
@@ -754,8 +754,8 @@ CONTAINS
     stypvar1(2)%conline_operation  = 'On u-grid'
     stypvar1(2)%caxis              = 'time depthu nav_lon_u nav_lat_u'
 
-    ipk1(:)                        = jpk
-    stypvar2(1)%ichunk             = (/jpiglo,MAX(1,jpjglo/30),1,1 /)
+    ipk1(:)                        = npk
+    stypvar2(1)%ichunk             = (/npiglo,MAX(1,npjglo/30),1,1 /)
     stypvar2(1)%cname              = 'advh_vv'
     stypvar2(1)%cunits             = 'm/s^2'
     stypvar2(1)%rmissing_value     = 99999.
@@ -766,7 +766,7 @@ CONTAINS
     stypvar2(1)%conline_operation  = 'On v-grid'
     stypvar2(1)%caxis              = 'time depthv nav_lon_v nav_lat_v'
     !
-    stypvar2(2)%ichunk             = (/jpiglo,MAX(1,jpjglo/30),1,1 /)
+    stypvar2(2)%ichunk             = (/npiglo,MAX(1,npjglo/30),1,1 /)
     stypvar2(2)%cname              = 'advz_vv'
     stypvar2(2)%cunits             = 'm/s^2'
     stypvar2(2)%rmissing_value     = 99999.
@@ -777,9 +777,9 @@ CONTAINS
     stypvar2(2)%conline_operation  = 'On v-grid'
     stypvar2(2)%caxis              = 'time depthv nav_lon_v nav_lat_v'
 
-    ipk2(:)                        = jpk
+    ipk2(:)                        = npk
     IF ( eddymean .EQ. 'full ') THEN
-    stypvar3(1)%ichunk             = (/jpiglo,MAX(1,jpjglo/30),1,1 /)
+    stypvar3(1)%ichunk             = (/npiglo,MAX(1,npjglo/30),1,1 /)
     stypvar3(1)%cname              = 'advh_ke'
     stypvar3(1)%cunits             = 'm^2/s^3'
     stypvar3(1)%rmissing_value     = 99999.
@@ -790,7 +790,7 @@ CONTAINS
     stypvar3(1)%conline_operation  = 'On t-grid'
     stypvar3(1)%caxis              = 'time deptht nav_lon_t nav_lat_t'
     !
-    stypvar3(2)%ichunk             = (/jpiglo,MAX(1,jpjglo/30),1,1 /)
+    stypvar3(2)%ichunk             = (/npiglo,MAX(1,npjglo/30),1,1 /)
     stypvar3(2)%cname              = 'advz_ke'
     stypvar3(2)%cunits             = 'm^2/s^3'
     stypvar3(2)%rmissing_value     = 99999.
@@ -801,7 +801,7 @@ CONTAINS
     stypvar3(2)%conline_operation  = 'On t-grid'
     stypvar3(2)%caxis              = 'time deptht nav_lon_t nav_lat_t'
     ELSE
-    stypvar3(1)%ichunk             = (/jpiglo,MAX(1,jpjglo/30),1,1 /)
+    stypvar3(1)%ichunk             = (/npiglo,MAX(1,npjglo/30),1,1 /)
     stypvar3(1)%cname              = 'advh_ke_m'
     stypvar3(1)%cunits             = 'm^2/s^3'
     stypvar3(1)%rmissing_value     = 99999.
@@ -812,7 +812,7 @@ CONTAINS
     stypvar3(1)%conline_operation  = 'On t-grid'
     stypvar3(1)%caxis              = 'time deptht nav_lon_t nav_lat_t'
     !
-    stypvar3(2)%ichunk             = (/jpiglo,MAX(1,jpjglo/30),1,1 /)
+    stypvar3(2)%ichunk             = (/npiglo,MAX(1,npjglo/30),1,1 /)
     stypvar3(2)%cname              = 'advz_ke_m'
     stypvar3(2)%cunits             = 'm^2/s^3'
     stypvar3(2)%rmissing_value     = 99999.
@@ -823,7 +823,7 @@ CONTAINS
     stypvar3(2)%conline_operation  = 'On t-grid'
     stypvar3(2)%caxis              = 'time deptht nav_lon_t nav_lat_t'
     !
-    stypvar3(3)%ichunk             = (/jpiglo,MAX(1,jpjglo/30),1,1 /)
+    stypvar3(3)%ichunk             = (/npiglo,MAX(1,npjglo/30),1,1 /)
     stypvar3(3)%cname              = 'advh_ke_pr'
     stypvar3(3)%cunits             = 'm^2/s^3'
     stypvar3(3)%rmissing_value     = 99999.
@@ -834,7 +834,7 @@ CONTAINS
     stypvar3(3)%conline_operation  = 'On t-grid'
     stypvar3(3)%caxis              = 'time deptht nav_lon_t nav_lat_t'
     !
-    stypvar3(4)%ichunk             = (/jpiglo,MAX(1,jpjglo/30),1,1 /)
+    stypvar3(4)%ichunk             = (/npiglo,MAX(1,npjglo/30),1,1 /)
     stypvar3(4)%cname              = 'advz_ke_pr'
     stypvar3(4)%cunits             = 'm^2/s^3'
     stypvar3(4)%rmissing_value     = 99999.
@@ -847,22 +847,22 @@ CONTAINS
     END IF
 
     ! create output fileset
-    ncout_u = create      (cf_out_u, cf_uu ,  jpiglo, jpjglo, jpk, cdep=cn_vdepthu  , ld_nc4=lnc4 )
-    ierr    = createvar   (ncout_u , stypvar1,  pnvarout1, ipk1 , id_varout_u           , ld_nc4=lnc4 )
-    ierr    = putheadervar(ncout_u , cf_uu ,  jpiglo, jpjglo, jpk, nav_lon_u, nav_lat_u, depthu   )
+    ncout_u = create      (cf_out_u, cf_uu ,  npiglo, npjglo, npk, cdep=cn_vdepthu  , ld_nc4=lnc4 )
+    ierr    = createvar   (ncout_u , stypvar1,  jpnvarout1, ipk1 , id_varout_u           , ld_nc4=lnc4 )
+    ierr    = putheadervar(ncout_u , cf_uu ,  npiglo, npjglo, npk, rlon_u, rlat_u, depthu   )
 
-    ncout_v = create      (cf_out_v, cf_vv ,  jpiglo, jpjglo, jpk, cdep=cn_vdepthv  , ld_nc4=lnc4 )
-    ierr    = createvar   (ncout_v , stypvar2,  pnvarout1, ipk1 , id_varout_v           , ld_nc4=lnc4 )
-    ierr    = putheadervar(ncout_v , cf_vv ,  jpiglo, jpjglo, jpk, nav_lon_v, nav_lat_v, depthv   )
+    ncout_v = create      (cf_out_v, cf_vv ,  npiglo, npjglo, npk, cdep=cn_vdepthv  , ld_nc4=lnc4 )
+    ierr    = createvar   (ncout_v , stypvar2,  jpnvarout1, ipk1 , id_varout_v           , ld_nc4=lnc4 )
+    ierr    = putheadervar(ncout_v , cf_vv ,  npiglo, npjglo, npk, rlon_v, rlat_v, depthv   )
 
-    ncout_ke= create     (cf_out_ke, cf_tt ,  jpiglo, jpjglo, jpk, cdep=cn_vdeptht  , ld_nc4=lnc4 )
-    ierr    = createvar   (ncout_ke , stypvar3,  pnvarout2, ipk2 , id_varout_ke          , ld_nc4=lnc4 )
-    ierr    = putheadervar(ncout_ke , cf_tt ,  jpiglo, jpjglo, jpk, nav_lon_t, nav_lat_t, deptht   )
+    ncout_ke= create     (cf_out_ke, cf_tt ,  npiglo, npjglo, npk, cdep=cn_vdeptht  , ld_nc4=lnc4 )
+    ierr    = createvar   (ncout_ke , stypvar3,  jpnvarout2, ipk2 , id_varout_ke          , ld_nc4=lnc4 )
+    ierr    = putheadervar(ncout_ke , cf_tt ,  npiglo, npjglo, npk, rlon_t, rlat_t, deptht   )
 
-    dtim = getvar1d(cf_uu , cn_vtimec,   jpt     )
-    ierr = putvar1d(ncout_u , dtim,      jpt, 'T')
-    ierr = putvar1d(ncout_v , dtim,      jpt, 'T')
-    ierr = putvar1d(ncout_ke, dtim,      jpt, 'T')
+    dtim = getvar1d(cf_uu , cn_vtimec,   npt     )
+    ierr = putvar1d(ncout_u , dtim,      npt, 'T')
+    ierr = putvar1d(ncout_v , dtim,      npt, 'T')
+    ierr = putvar1d(ncout_ke, dtim,      npt, 'T')
 
 
   END SUBROUTINE CreateOutput
