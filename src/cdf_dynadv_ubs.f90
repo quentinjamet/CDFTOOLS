@@ -234,9 +234,9 @@ PROGRAM cdf_dynadv_ubs
   END SELECT
 
   !-- Allocate --
-  ALLOCATE( ipk2(jpnvarout2)                                                )
-  ALLOCATE( id_varout_ke(jpnvarout2)                                        )
-  ALLOCATE( stypvar3(jpnvarout2)                                            )
+  ALLOCATE( ipk2(jpnvarout2)                                               )
+  ALLOCATE( id_varout_ke(jpnvarout2)                                       )
+  ALLOCATE( stypvar3(jpnvarout2)                                           )
   ! mesh
   ALLOCATE( deptht(npk)                   , depthu(npk)                    , depthv(npk)                    )
   ALLOCATE( rlon_t(npiglo, npjglo)        , rlat_t(npiglo, npjglo)         )
@@ -300,7 +300,7 @@ PROGRAM cdf_dynadv_ubs
    PRINT *, '-- klayer: ', jk
 
    !-- load vert. mesh (at rest) and masks (dommsk.f90) --
-   e3t_0(:,:) = getvar(cf_mz  , cn_ve3t0 , jk, npiglo, npjglo)
+   e3t_0(:,:) = getvar(cf_mz  , cn_ve3t0 , jk, npiglo, npjglo )
    e3u_0(:,:) = e3t_0(:,:)
    e3v_0(:,:) = e3t_0(:,:)
    DO jj = 1, npjm1
@@ -309,7 +309,7 @@ PROGRAM cdf_dynadv_ubs
          e3v_0 (ji,jj) = MIN( e3t_0(ji,jj), e3t_0(ji,jj+1) )
       END DO
    END DO
-   tmask(:,:) = getvar(cf_mask, cn_tmask , jk, npiglo, npjglo)
+   tmask(:,:) = getvar(cf_mask, cn_tmask , jk, npiglo, npjglo )
    umask(:,:) = getvar(cf_mask, cn_umask , jk, npiglo, npjglo )
    vmask(:,:) = getvar(cf_mask, cn_vmask , jk, npiglo, npjglo )
    !! fmask = 2 on lateral boundaries for no-slip bdy conditions on vorticity !!
