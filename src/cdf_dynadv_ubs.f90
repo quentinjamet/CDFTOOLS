@@ -11,6 +11,7 @@ PROGRAM cdf_dynadv_ubs
   !! History : 4.0  : 09/2019  : Q. Jamet & J.M. Molines : Original code
   !!                : 05/2021  : Q. Jamet & J.M. Molines : Turn the computation layer per layer
   !!                                                       to avoid memory issues.
+  !!                : 06/2021  : Q. Jamet & J.M. Molines : Add eddy/mean decomposition
   !!----------------------------------------------------------------------
   USE cdfio
   USE modcdfnames   ! for cdf variable names
@@ -24,8 +25,8 @@ PROGRAM cdf_dynadv_ubs
   IMPLICIT NONE
 
   INTEGER(KIND=4), PARAMETER                   :: wp=4
-  INTEGER(KIND=4), PARAMETER                   :: jpnvarout1 = 2            ! number of output variables (uv)
-  INTEGER(KIND=4)                              :: jpnvarout2                ! number of output variables (ke)
+  INTEGER(KIND=4), PARAMETER                   :: jpnvarout1 = 2           ! number of output variables (uv)
+  INTEGER(KIND=4)                              :: jpnvarout2               ! number of output variables (ke)
   INTEGER(KIND=4)                              :: ji, jj, jk, jt           ! dummy loop indices
   INTEGER(KIND=4)                              :: it                       ! time index for vvl
   INTEGER(KIND=4)                              :: ierr                     ! working integer
@@ -36,19 +37,19 @@ PROGRAM cdf_dynadv_ubs
   INTEGER(KIND=4)                              :: npkk=3                   ! number of level to load (nkkm1, nkk, nkkp1)
   INTEGER(KIND=4)                              :: ncout_u, ncout_v         ! ncid of output file
   INTEGER(KIND=4)                              :: ncout_ke                 ! ncid of output file
-  INTEGER(KIND=4), DIMENSION(jpnvarout1)        :: ipk1                     ! level of output variables
+  INTEGER(KIND=4), DIMENSION(jpnvarout1)       :: ipk1                     ! level of output variables
   INTEGER(KIND=4), DIMENSION(:), ALLOCATABLE   :: ipk2                     ! level of output variables
-  INTEGER(KIND=4), DIMENSION(jpnvarout1)        :: id_varout_u              ! id of output variables (u-comp)
-  INTEGER(KIND=4), DIMENSION(jpnvarout1)        :: id_varout_v              ! id of output variables (v-comp)
+  INTEGER(KIND=4), DIMENSION(jpnvarout1)       :: id_varout_u              ! id of output variables (u-comp)
+  INTEGER(KIND=4), DIMENSION(jpnvarout1)       :: id_varout_v              ! id of output variables (v-comp)
   INTEGER(KIND=4), DIMENSION(:), ALLOCATABLE   :: id_varout_ke             ! id of output variables (ke-comp)
 
-  REAL(wp)                                     :: pp_gamma1 = 1._wp/3._wp     ! =0 no dissipation ; =1/4 quick   ; =1/3  3rd order UBS
-  REAL(wp), PARAMETER                          :: pp_gamma2 = 1._wp/32._wp    ! =0   2nd order  ; =1/32 4th order centred
+  REAL(wp)                                     :: pp_gamma1 = 1._wp/3._wp  ! =0 no dissipation ; =1/4 quick   ; =1/3  3rd order UBS
+  REAL(wp), PARAMETER                          :: pp_gamma2 = 1._wp/32._wp ! =0   2nd order  ; =1/32 4th order centred
   REAL(wp), DIMENSION(:)    , ALLOCATABLE      :: dtim                     ! time
   REAL(wp), DIMENSION(:)    , ALLOCATABLE      :: deptht, depthu, depthv   ! z-grid (t, u,v)
-  REAL(wp), DIMENSION(:,:)  , ALLOCATABLE      :: rlon_t, rlat_t     ! t-grid hor.
-  REAL(wp), DIMENSION(:,:)  , ALLOCATABLE      :: rlon_u, rlat_u     ! u-grid hor.
-  REAL(wp), DIMENSION(:,:)  , ALLOCATABLE      :: rlon_v, rlat_v     ! v-grid hor.
+  REAL(wp), DIMENSION(:,:)  , ALLOCATABLE      :: rlon_t, rlat_t           ! t-grid hor.
+  REAL(wp), DIMENSION(:,:)  , ALLOCATABLE      :: rlon_u, rlat_u           ! u-grid hor.
+  REAL(wp), DIMENSION(:,:)  , ALLOCATABLE      :: rlon_v, rlat_v           ! v-grid hor.
   REAL(wp), DIMENSION(:,:)  , ALLOCATABLE      :: ht_0                     ! Reference ocean depth at T-points
   REAL(wp), DIMENSION(:,:)  , ALLOCATABLE      :: sshn                     ! now sea surface height
   REAL(wp), DIMENSION(:,:)  , ALLOCATABLE      :: sshnm                    ! now sea surface height - mean
@@ -87,8 +88,8 @@ PROGRAM cdf_dynadv_ubs
   CHARACTER(LEN=256)                           :: cglobal                  ! global attribute
   CHARACTER(LEN=256)                           :: eddymean='full'          ! select what to compute
 
-  TYPE (variable), DIMENSION(jpnvarout1)        :: stypvar1                 ! structure for attibutes (u-comp)
-  TYPE (variable), DIMENSION(jpnvarout1)        :: stypvar2                 ! structure for attibutes (v-comp)
+  TYPE (variable), DIMENSION(jpnvarout1)       :: stypvar1                 ! structure for attibutes (u-comp)
+  TYPE (variable), DIMENSION(jpnvarout1)       :: stypvar2                 ! structure for attibutes (v-comp)
   TYPE (variable), DIMENSION(:), ALLOCATABLE   :: stypvar3                 ! structure for attibutes (ke-comp)
 
   LOGICAL                                      :: l_w   =.FALSE.           ! flag for vertical location of bn2
@@ -102,7 +103,7 @@ PROGRAM cdf_dynadv_ubs
   narg= iargc()
   IF ( narg == 0 ) THEN
      PRINT *,' usage : cdf_dynadv_ubs -t T-file -u U-file -v V-file -w W-file SSH-file ...'
-     PRINT *,'          -um Um-file -v V-file -vm Vm-file ...'
+     PRINT *,'          -um Um-file -vm Vm-file -vm Vm-file ...'
      PRINT *,'          -mh MESH-file -mz MESZ-file -mask MASK-file -bathy BATHY-file ...'
      PRINT *,'          -o_u OUT-file-u -o_v OUT-file-v -o_ke OUT-file-ke ...'
      PRINT *,'          -em eddy-mean_option -nodiss'
@@ -112,7 +113,7 @@ PROGRAM cdf_dynadv_ubs
      PRINT *,'      of Shchepetkin & McWilliams (2005).'
      PRINT *,'      Options are provided for computing the eddy/mean decompositions (-em),'
      PRINT *,'      and remove the diffusive term included in this advective scheme (-nodiss).'
-     PRINT *,'      The latter is done by turnin pp_gamma1 = 0.0.'
+     PRINT *,'      The latter is done by turning pp_gamma1 = 0.0.'
      PRINT *,'      '
      PRINT *,'     ARGUMENTS :'
      PRINT *,'       -t T-file          : netcdf file for      temperature (for mesh only)'
@@ -126,20 +127,28 @@ PROGRAM cdf_dynadv_ubs
      PRINT *,'       -bathy BATHY-file  : netcdf file for model bathymetry'
      PRINT *,'      '
      PRINT *,'     OPTIONS :'
-     PRINT *,'       -em                : Eddy-mean option (full, mean-mean, eddy-mean, mean-eddy, eddy-eddy)'
+     PRINT *,'       -em                : Eddy-mean option '
+     PRINT *,'                            (full, mean-mean, eddy-mean, mean-eddy, eddy-eddy)'
+     PRINT *,'                            (default: '//TRIM(eddymean)//')'
      PRINT *,'             --- For eddy-mean decomposition, no need if the option em=full'
      PRINT *,'       -um Um-file        : netcdf file for MEAN zonal velocity'
      PRINT *,'       -vm Vm-file        : netcdf file for MEAN meridional velocity'
      PRINT *,'       -wm Wm-file        : netcdf file for MEAN vertical velocity'
      PRINT *,'             ---  ' 
-     PRINT *,'       -nodiss            : To remove dissipation term in the UBS advection scheme'
+     PRINT *,'       -nodiss            : To remove dissipation term in the UBS advection scheme;'
+     PRINT *,'                          :   =.TRUE. in case eddy/mean decomposition activated'
+     PRINT *,'                          :   to insure balance between full and eddy/mean terms.'
+     PRINT *,'       -nc4               : use netcdf4/HDF5 with chunking and deflation on output'
      PRINT *,'      '
      PRINT *,'     OUTPUT : '
      PRINT *,'       netcdf file : '
-     PRINT *,'       -o_u OUT-file      : netcdf file for advection term for u-momentum'
-     PRINT *,'       -o_v OUT-file      : netcdf file for advection term for v-momentum'
-     PRINT *,'       -o_ke OUT-file     : netcdf file for advection term for KE '
-     PRINT *,'                                  (ubar*putrd + vbar*pvtrd) ; (upr*putrd + vpr*pvtrd)'
+     PRINT *,'       -o_u OUT-file      : netcdf file for advection term for u-momentum '
+     PRINT *,'                                          (defaulf: '//TRIM(cf_out_u)//' )'
+     PRINT *,'       -o_v OUT-file      : netcdf file for advection term for v-momentum '
+     PRINT *,'                                          (defaulf: '//TRIM(cf_out_v)//' )'
+     PRINT *,'       -o_ke OUT-file     : netcdf file for advection term for KE         '
+     PRINT *,'                           (ubar*putrd + vbar*pvtrd) ; (upr*putrd + vpr*pvtrd)'
+     PRINT *,'                                          (defaulf: '//TRIM(cf_out_ke)//')'
      PRINT *,'      '
      PRINT *,'     SEE ALSO :'
      PRINT *,'      '
@@ -178,6 +187,7 @@ PROGRAM cdf_dynadv_ubs
   END DO
   IF ( eddymean .NE. 'full' ) THEN
      jpnvarout2=4
+     nodiss  = .TRUE.           ! impose no dissipation in eddy/mean computation
   ELSE
      jpnvarout2=2
   END IF
@@ -230,9 +240,9 @@ PROGRAM cdf_dynadv_ubs
   ALLOCATE( stypvar3(jpnvarout2)                                            )
   ! mesh
   ALLOCATE( deptht(npk)                   , depthu(npk)                    , depthv(npk)                    )
-  ALLOCATE( rlon_t(npiglo, npjglo)     , rlat_t(npiglo, npjglo)      )
-  ALLOCATE( rlon_u(npiglo, npjglo)     , rlat_u(npiglo, npjglo)      )
-  ALLOCATE( rlon_v(npiglo, npjglo)     , rlat_v(npiglo, npjglo)      )
+  ALLOCATE( rlon_t(npiglo, npjglo)        , rlat_t(npiglo, npjglo)         )
+  ALLOCATE( rlon_u(npiglo, npjglo)        , rlat_u(npiglo, npjglo)         )
+  ALLOCATE( rlon_v(npiglo, npjglo)        , rlat_v(npiglo, npjglo)         )
   ALLOCATE( ht_0(npiglo, npjglo)                                           )
   ALLOCATE( e1t(npiglo, npjglo)           , e2t(npiglo, npjglo)            )
   ALLOCATE( e1u(npiglo, npjglo)           , e2u(npiglo, npjglo)            )
