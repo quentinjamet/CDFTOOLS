@@ -51,7 +51,6 @@ PROGRAM cdf_dynadv_ubs
   REAL(wp), DIMENSION(:,:)  , ALLOCATABLE      :: rlon_v, rlat_v           ! v-grid hor.
   REAL(wp), DIMENSION(:,:)  , ALLOCATABLE      :: ht_0                     ! Reference ocean depth at T-points
   REAL(wp), DIMENSION(:,:)  , ALLOCATABLE      :: sshn                     ! now sea surface height
-  REAL(wp), DIMENSION(:,:)  , ALLOCATABLE      :: sshnm                    ! now sea surface height - mean
   REAL(wp), DIMENSION(:,:)  , ALLOCATABLE      :: e1t, e2t                 ! horizontal metric, t-pts
   REAL(wp), DIMENSION(:,:)  , ALLOCATABLE      :: e1u, e2u                 ! horizontal metric, u-pts
   REAL(wp), DIMENSION(:,:)  , ALLOCATABLE      :: e1v, e2v                 ! horizontal metric, v-pts
@@ -61,9 +60,9 @@ PROGRAM cdf_dynadv_ubs
   REAL(wp), DIMENSION(:,:)  , ALLOCATABLE      :: tmask, fmask             ! mesh masks
   REAL(wp), DIMENSION(:,:)  , ALLOCATABLE      :: umask, vmask             ! mesh masks
   REAL(wp), DIMENSION(:,:,:), ALLOCATABLE      :: wn                       ! 3D vert. velocity (now)
-  REAL(wp), DIMENSION(:,:,:), ALLOCATABLE      :: wnm                      ! 3D vert. velocity (now) - mean
+  REAL(wp), DIMENSION(:,:,:), ALLOCATABLE      :: wnm, wpr                 ! 3D vert. velocity (now) - mean/eddy
   REAL(wp), DIMENSION(:,:,:), ALLOCATABLE      :: un, vn                   ! 3D hz. velocity (now)
-  REAL(wp), DIMENSION(:,:,:), ALLOCATABLE      :: unm, vnm                 ! 3D hz. velocity (now) - mean
+  REAL(wp), DIMENSION(:,:,:), ALLOCATABLE      :: unm, vnm, upr, vpr       ! 3D hz. velocity (now) - mean/eddy
   REAL(wp), DIMENSION(:,:)  , ALLOCATABLE      :: adv_h_u, adv_z_u         ! hor. and vert. advection of u-mom. (outputs)
   REAL(wp), DIMENSION(:,:)  , ALLOCATABLE      :: adv_h_v, adv_z_v         ! hor. and vert. advection of v-mom. (outputs)
   REAL(wp), DIMENSION(:,:)  , ALLOCATABLE      :: adv_h_ke, adv_z_ke       ! hor. and vert. advection of KE     (outputs)
@@ -102,7 +101,7 @@ PROGRAM cdf_dynadv_ubs
   narg= iargc()
   IF ( narg == 0 ) THEN
      PRINT *,' usage : cdf_dynadv_ubs -t T-file -u U-file -v V-file -w W-file SSH-file ...'
-     PRINT *,'          [-um Um-file -vm Vm-file -vm Vm-file] ...'
+     PRINT *,'          [-um Um-file -vm Vm-file -wm Wm-file] ...'
      PRINT *,'          -mh MESH-file -mz MESZ-file -mask MASK-file -bathy BATHY-file ...'
      PRINT *,'          [-o_u OUT-file-u -o_v OUT-file-v -o_ke OUT-file-ke ...'
      PRINT *,'          -em eddy-mean_option -nodiss]'
@@ -113,6 +112,8 @@ PROGRAM cdf_dynadv_ubs
      PRINT *,'      Options are provided for computing the eddy/mean decompositions (-em),'
      PRINT *,'      and remove the diffusive term included in this advective scheme (-nodiss).'
      PRINT *,'      The latter is done by turning pp_gamma1 = 0.0.'
+     PRINT *,'      The -nodiss option is forced to .TRUE. in case of eddy/mean'
+     PRINT *,'      decomposition.'
      PRINT *,'      '
      PRINT *,'     ARGUMENTS :'
      PRINT *,'       -t T-file          : netcdf file for      temperature (for mesh only)'
@@ -258,9 +259,10 @@ PROGRAM cdf_dynadv_ubs
   ALLOCATE( un(npiglo, npjglo, npkk)      , vn(npiglo, npjglo, npkk)       )
   ALLOCATE( wn(npiglo, npjglo, npkk)                                       )
   IF ( eddymean .NE. 'full' ) THEN
-     ALLOCATE( sshnm(npiglo, npjglo)                                       )
      ALLOCATE( unm(npiglo, npjglo, npkk)  , vnm(npiglo, npjglo, npkk)      )
      ALLOCATE( wnm(npiglo, npjglo, npkk)                                   )
+     ALLOCATE( upr(npiglo, npjglo, npkk)  , vpr(npiglo, npjglo, npkk)      )
+     ALLOCATE( wpr(npiglo, npjglo, npkk)                                   )
   END IF 
   !
   ALLOCATE( adv_h_u(npiglo, npjglo)       , adv_z_u(npiglo, npjglo)        )
@@ -324,6 +326,9 @@ PROGRAM cdf_dynadv_ubs
         unm(:,:,:)   = 0._wp
         vnm(:,:,:)   = 0._wp
         wnm(:,:,:)   = 0._wp
+        upr(:,:,:)   = 0._wp
+        vpr(:,:,:)   = 0._wp
+        wpr(:,:,:)   = 0._wp
      END IF
      ! 
      sshn(:,:)     = getvar(cf_ssh  , cn_sossheig, 1, npiglo, npjglo, ktime=jt )
@@ -345,8 +350,6 @@ PROGRAM cdf_dynadv_ubs
      !-- Load variables --
      IF ( jk == 1 ) THEN
         !- variable -
-        un(:,:,nkk  ) = getvar(cf_uu, cn_vozocrtx, jk  , npiglo, npjglo, ktime=jt )
-        vn(:,:,nkk  ) = getvar(cf_vv, cn_vomecrty, jk  , npiglo, npjglo, ktime=jt )
         un(:,:,nkk  ) = getvar(cf_uu, cn_vozocrtx, jk  , npiglo, npjglo, ktime=jt )
         vn(:,:,nkk  ) = getvar(cf_vv, cn_vomecrty, jk  , npiglo, npjglo, ktime=jt )
         wn(:,:,nkk  ) = getvar(cf_ww, cn_vovecrtz, jk  , npiglo, npjglo, ktime=jt )
@@ -386,6 +389,11 @@ PROGRAM cdf_dynadv_ubs
            wnm(:,:,nkkp1) = getvar(cf_wm, cn_vovecrtz, jk+1, npiglo, npjglo, ktime=jt )
         END IF
      ENDIF
+     IF ( eddymean .NE. 'full' ) THEN
+        upr(:,:,:) = un(:,:,:) - unm(:,:,:)
+        vpr(:,:,:) = vn(:,:,:) - vnm(:,:,:)
+        wpr(:,:,:) = wn(:,:,:) - wnm(:,:,:)
+     END IF
 
      !-- Advection and KE trends --
      SELECT CASE (eddymean)
@@ -412,12 +420,12 @@ PROGRAM cdf_dynadv_ubs
         ierr = putvar(ncout_ke, id_varout_ke(1), adv_h_ke(:,:), jk, npiglo, npjglo, ktime=jt )
         ierr = putvar(ncout_ke, id_varout_ke(2), adv_z_ke(:,:), jk, npiglo, npjglo, ktime=jt )
         ! KE  --  uprime*
-        CALL trd_ken( adv_h_u, adv_h_v, adv_h_ke, un(:,:,:)-unm(:,:,:), vn(:,:,:)-vnm(:,:,:) )
-        CALL trd_ken( adv_z_u, adv_z_v, adv_z_ke, un(:,:,:)-unm(:,:,:), vn(:,:,:)-vnm(:,:,:) )
+        CALL trd_ken( adv_h_u, adv_h_v, adv_h_ke, upr, vpr )
+        CALL trd_ken( adv_z_u, adv_z_v, adv_z_ke, upr, vpr )
         ierr = putvar(ncout_ke, id_varout_ke(3), adv_h_ke(:,:), jk, npiglo, npjglo, ktime=jt )
         ierr = putvar(ncout_ke, id_varout_ke(4), adv_z_ke(:,:), jk, npiglo, npjglo, ktime=jt )
      CASE ('mean-eddy') ;
-        CALL dyn_adv_ubs( jt, jk, unm, vnm, wnm, un(:,:,:)-unm(:,:,:), vn(:,:,:)-vnm(:,:,:) )
+        CALL dyn_adv_ubs( jt, jk, unm, vnm, wnm, upr, vpr )
         ierr = putvar(ncout_u , id_varout_u(1) , adv_h_u(:,:) , jk, npiglo, npjglo, ktime=jt )
         ierr = putvar(ncout_u , id_varout_u(2) , adv_z_u(:,:) , jk, npiglo, npjglo, ktime=jt )
         ierr = putvar(ncout_v , id_varout_v(1) , adv_h_v(:,:) , jk, npiglo, npjglo, ktime=jt )
@@ -428,13 +436,12 @@ PROGRAM cdf_dynadv_ubs
         ierr = putvar(ncout_ke, id_varout_ke(1), adv_h_ke(:,:), jk, npiglo, npjglo, ktime=jt )
         ierr = putvar(ncout_ke, id_varout_ke(2), adv_z_ke(:,:), jk, npiglo, npjglo, ktime=jt )
         ! KE  --  uprime*
-        CALL trd_ken( adv_h_u, adv_h_v, adv_h_ke, un(:,:,:)-unm(:,:,:), vn(:,:,:)-vnm(:,:,:) )
-        CALL trd_ken( adv_z_u, adv_z_v, adv_z_ke, un(:,:,:)-unm(:,:,:), vn(:,:,:)-vnm(:,:,:) )
+        CALL trd_ken( adv_h_u, adv_h_v, adv_h_ke, upr, vpr )
+        CALL trd_ken( adv_z_u, adv_z_v, adv_z_ke, upr, vpr )
         ierr = putvar(ncout_ke, id_varout_ke(3), adv_h_ke(:,:), jk, npiglo, npjglo, ktime=jt )
         ierr = putvar(ncout_ke, id_varout_ke(4), adv_z_ke(:,:), jk, npiglo, npjglo, ktime=jt )
      CASE ('eddy-mean') ;
-        CALL dyn_adv_ubs( jt, jk, un(:,:,:)-unm(:,:,:), vn(:,:,:)-vnm(:,:,:), &
-                   & wn(:,:,:)-wnm(:,:,:), unm, vnm )
+        CALL dyn_adv_ubs( jt, jk, upr, vpr, wpr, unm, vnm )
         ierr = putvar(ncout_u , id_varout_u(1) , adv_h_u(:,:) , jk, npiglo, npjglo, ktime=jt )
         ierr = putvar(ncout_u , id_varout_u(2) , adv_z_u(:,:) , jk, npiglo, npjglo, ktime=jt )
         ierr = putvar(ncout_v , id_varout_v(1) , adv_h_v(:,:) , jk, npiglo, npjglo, ktime=jt )
@@ -445,13 +452,12 @@ PROGRAM cdf_dynadv_ubs
         ierr = putvar(ncout_ke, id_varout_ke(1), adv_h_ke(:,:), jk, npiglo, npjglo, ktime=jt )
         ierr = putvar(ncout_ke, id_varout_ke(2), adv_z_ke(:,:), jk, npiglo, npjglo, ktime=jt )
         ! KE  --  uprime*
-        CALL trd_ken( adv_h_u, adv_h_v, adv_h_ke, un(:,:,:)-unm(:,:,:), vn(:,:,:)-vnm(:,:,:) )
-        CALL trd_ken( adv_z_u, adv_z_v, adv_z_ke, un(:,:,:)-unm(:,:,:), vn(:,:,:)-vnm(:,:,:) )
+        CALL trd_ken( adv_h_u, adv_h_v, adv_h_ke, upr, vpr )
+        CALL trd_ken( adv_z_u, adv_z_v, adv_z_ke, upr, vpr )
         ierr = putvar(ncout_ke, id_varout_ke(3), adv_h_ke(:,:), jk, npiglo, npjglo, ktime=jt )
         ierr = putvar(ncout_ke, id_varout_ke(4), adv_z_ke(:,:), jk, npiglo, npjglo, ktime=jt )
      CASE ('eddy-eddy') ;
-        CALL dyn_adv_ubs( jt, jk, un(:,:,:)-unm(:,:,:), vn(:,:,:)-vnm(:,:,:), wn(:,:,:)-wnm(:,:,:), &
-                   & un(:,:,:)-unm(:,:,:), vn(:,:,:)-vnm(:,:,:) )
+        CALL dyn_adv_ubs( jt, jk, upr, vpr, wpr, upr, vpr )
         ierr = putvar(ncout_u , id_varout_u(1) , adv_h_u(:,:) , jk, npiglo, npjglo, ktime=jt )
         ierr = putvar(ncout_u , id_varout_u(2) , adv_z_u(:,:) , jk, npiglo, npjglo, ktime=jt )
         ierr = putvar(ncout_v , id_varout_v(1) , adv_h_v(:,:) , jk, npiglo, npjglo, ktime=jt )
@@ -462,8 +468,8 @@ PROGRAM cdf_dynadv_ubs
         ierr = putvar(ncout_ke, id_varout_ke(1), adv_h_ke(:,:), jk, npiglo, npjglo, ktime=jt )
         ierr = putvar(ncout_ke, id_varout_ke(2), adv_z_ke(:,:), jk, npiglo, npjglo, ktime=jt )
         ! KE  --  uprime*
-        CALL trd_ken( adv_h_u, adv_h_v, adv_h_ke, un(:,:,:)-unm(:,:,:), vn(:,:,:)-vnm(:,:,:) )
-        CALL trd_ken( adv_z_u, adv_z_v, adv_z_ke, un(:,:,:)-unm(:,:,:), vn(:,:,:)-vnm(:,:,:) )
+        CALL trd_ken( adv_h_u, adv_h_v, adv_h_ke, upr, vpr)
+        CALL trd_ken( adv_z_u, adv_z_v, adv_z_ke, upr, vpr )
         ierr = putvar(ncout_ke, id_varout_ke(3), adv_h_ke(:,:), jk, npiglo, npjglo, ktime=jt )
         ierr = putvar(ncout_ke, id_varout_ke(4), adv_z_ke(:,:), jk, npiglo, npjglo, ktime=jt )
      END SELECT
